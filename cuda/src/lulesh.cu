@@ -3111,125 +3111,6 @@ void printUsage(char* argv[]) {
   printf("%s -u sedov15oct.lmesh\n", argv[0]);
 }
 
-#ifdef SAMI
-
-  #ifdef __cplusplus
-extern "C" {
-  #endif
-  #include "silo.h"
-  #ifdef __cplusplus
-}
-  #endif
-
-  #define MAX_LEN_SAMI_HEADER 10
-
-  #define SAMI_HDR_NUMBRICK 0
-  #define SAMI_HDR_NUMNODES 3
-  #define SAMI_HDR_NUMMATERIAL 4
-  #define SAMI_HDR_INDEX_START 6
-  #define SAMI_HDR_MESHDIM 7
-
-  #define MAX_ADJACENCY 14 /* must be 14 or greater */
-
-void DumpSAMI(Domain* domain, char* name) {
-  DBfile* fp;
-  int headerLen = MAX_LEN_SAMI_HEADER;
-  int headerInfo[MAX_LEN_SAMI_HEADER];
-  char varName[] = "brick_nd0";
-  char coordName[] = "x";
-  int version = 121;
-  int numElem = int(domain->numElem);
-  int numNode = int(domain->numNode);
-  int count;
-
-  int* materialID;
-  int* nodeConnect;
-  double* nodeCoord;
-
-  if ((fp = DBCreate(name, DB_CLOBBER, DB_LOCAL, NULL, DB_PDB)) == NULL) {
-    printf("Couldn't create file %s\n", name);
-    exit(1);
-  }
-
-  for (int i = 0; i < MAX_LEN_SAMI_HEADER; ++i) {
-    headerInfo[i] = 0;
-  }
-  headerInfo[SAMI_HDR_NUMBRICK] = numElem;
-  headerInfo[SAMI_HDR_NUMNODES] = numNode;
-  headerInfo[SAMI_HDR_NUMMATERIAL] = 1;
-  headerInfo[SAMI_HDR_INDEX_START] = 1;
-  headerInfo[SAMI_HDR_MESHDIM] = 3;
-
-  DBWrite(fp, "mesh_data", headerInfo, &headerLen, 1, DB_INT);
-
-  count = 1;
-  DBWrite(fp, "version", &version, &count, 1, DB_INT);
-
-  nodeConnect = new int[numElem];
-
-  Vector_h<Index_t> nodelist_h = domain->nodelist;
-
-  for (Index_t i = 0; i < 8; ++i) {
-    for (Index_t j = 0; j < numElem; ++j) {
-      nodeConnect[j] = int(nodelist_h[i * domain->padded_numElem + j]) + 1;
-    }
-    varName[8] = '0' + i;
-    DBWrite(fp, varName, nodeConnect, &numElem, 1, DB_INT);
-  }
-
-  delete[] nodeConnect;
-
-  nodeCoord = new double[numNode];
-
-  Vector_h<Real_t> x_h = domain->x;
-  Vector_h<Real_t> y_h = domain->y;
-  Vector_h<Real_t> z_h = domain->z;
-
-  for (Index_t i = 0; i < 3; ++i) {
-    for (Index_t j = 0; j < numNode; ++j) {
-      Real_t coordVal;
-      switch (i) {
-        case 0:
-          coordVal = double(x_h[j]);
-          break;
-        case 1:
-          coordVal = double(y_h[j]);
-          break;
-        case 2:
-          coordVal = double(z_h[j]);
-          break;
-      }
-      nodeCoord[j] = coordVal;
-    }
-    coordName[0] = 'x' + i;
-    DBWrite(fp, coordName, nodeCoord, &numNode, 1, DB_DOUBLE);
-  }
-
-  delete[] nodeCoord;
-
-  materialID = new int[numElem];
-
-  for (Index_t i = 0; i < numElem; ++i)
-    materialID[i] = 1;
-
-  DBWrite(fp, "brick_material", materialID, &numElem, 1, DB_INT);
-
-  delete[] materialID;
-
-  DBClose(fp);
-}
-#endif
-
-#ifdef SAMI
-void DumpDomain(Domain* domain) {
-  char meshName[64];
-  printf("Dumping SAMI file\n");
-  sprintf(meshName, "sedov_%d.sami", int(domain->cycle));
-
-  DumpSAMI(domain, meshName);
-}
-#endif
-
 void write_solution(Domain* locDom) {
   Vector_h<Real_t> x_h = locDom->x;
   Vector_h<Real_t> y_h = locDom->y;
@@ -3461,9 +3342,6 @@ int main(int argc, char* argv[]) {
   if (myRank == 0)
     VerifyAndWriteFinalOutput(elapsed_timeG, *locDom, its, nx, numRanks, structured);
 
-#ifdef SAMI
-  DumpDomain(locDom);
-#endif
   cudaDeviceReset();
 
   return 0;
