@@ -67,6 +67,8 @@ Additional BSD Notice
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/time.h>
+#include <unistd.h>
 #include <util.h>
 
 #include <iomanip>
@@ -75,14 +77,6 @@ Additional BSD Notice
 #include <sstream>
 
 #include "cuda_profiler_api.h"
-
-#ifdef USE_MPI
-  #include <mpi.h>
-#endif
-
-#include <sys/time.h>
-#include <unistd.h>
-
 #include "lulesh.h"
 
 /****************************************************/
@@ -134,15 +128,12 @@ __device__ inline real8 FMAX(real8 arg1, real8 arg2) { return fmax(arg1, arg2); 
 #define ZETA_P_FREE 0x10000
 #define ZETA_P_COMM 0x20000
 
-#define VOLUDER(a0, a1, a2, a3, a4, a5, b0, b1, b2, b3, b4, b5, dvdc) \
-  {                                                                   \
-    const Real_t twelfth = Real_t(1.0) / Real_t(12.0);                \
-                                                                      \
-    dvdc =                                                            \
-      ((a1) + (a2)) * ((b0) + (b1)) - ((a0) + (a1)) * ((b1) + (b2)) + \
-      ((a0) + (a4)) * ((b3) + (b4)) - ((a3) + (a4)) * ((b0) + (b4)) - \
-      ((a2) + (a5)) * ((b3) + (b5)) + ((a3) + (a5)) * ((b2) + (b5));  \
-    dvdc *= twelfth;                                                  \
+#define VOLUDER(a0, a1, a2, a3, a4, a5, b0, b1, b2, b3, b4, b5, dvdc)                                                                                                                                     \
+  {                                                                                                                                                                                                       \
+    const Real_t twelfth = Real_t(1.0) / Real_t(12.0);                                                                                                                                                    \
+                                                                                                                                                                                                          \
+    dvdc = ((a1) + (a2)) * ((b0) + (b1)) - ((a0) + (a1)) * ((b1) + (b2)) + ((a0) + (a4)) * ((b3) + (b4)) - ((a3) + (a4)) * ((b0) + (b4)) - ((a2) + (a5)) * ((b3) + (b5)) + ((a3) + (a5)) * ((b2) + (b5)); \
+    dvdc *= twelfth;                                                                                                                                                                                      \
   }
 /*
 __device__
@@ -225,10 +216,7 @@ __host__ __device__ static __forceinline__
   ((x1) * ((y2) * (z3) - (z2) * (y3)) + (x2) * ((z1) * (y3) - (y1) * (z3)) + (x3) * ((y1) * (z2) - (z1) * (y2)))
 
   // 11 + 3*14
-  Real_t volume =
-    TRIPLE_PRODUCT(dx31 + dx72, dx63, dx20, dy31 + dy72, dy63, dy20, dz31 + dz72, dz63, dz20) +
-    TRIPLE_PRODUCT(dx43 + dx57, dx64, dx70, dy43 + dy57, dy64, dy70, dz43 + dz57, dz64, dz70) +
-    TRIPLE_PRODUCT(dx14 + dx25, dx61, dx50, dy14 + dy25, dy61, dy50, dz14 + dz25, dz61, dz50);
+  Real_t volume = TRIPLE_PRODUCT(dx31 + dx72, dx63, dx20, dy31 + dy72, dy63, dy20, dz31 + dz72, dz63, dz20) + TRIPLE_PRODUCT(dx43 + dx57, dx64, dx70, dy43 + dy57, dy64, dy70, dz43 + dz57, dz64, dz70) + TRIPLE_PRODUCT(dx14 + dx25, dx61, dx50, dy14 + dy25, dy61, dy50, dz14 + dz25, dz61, dz50);
 
 #undef TRIPLE_PRODUCT
 
@@ -381,52 +369,6 @@ void Domain::SetupCommBuffers(Int_t edgeNodes) {
   m_colMax = (m_colLoc == m_tp - 1) ? 0 : 1;
   m_planeMin = (m_planeLoc == 0) ? 0 : 1;
   m_planeMax = (m_planeLoc == m_tp - 1) ? 0 : 1;
-
-#if USE_MPI
-  // account for face communication
-  Index_t comBufSize =
-    (m_rowMin + m_rowMax + m_colMin + m_colMax + m_planeMin + m_planeMax) *
-    maxPlaneSize * MAX_FIELDS_PER_MPI_COMM;
-
-  // account for edge communication
-  comBufSize +=
-    ((m_rowMin & m_colMin) + (m_rowMin & m_planeMin) + (m_colMin & m_planeMin) +
-     (m_rowMax & m_colMax) + (m_rowMax & m_planeMax) + (m_colMax & m_planeMax) +
-     (m_rowMax & m_colMin) + (m_rowMin & m_planeMax) + (m_colMin & m_planeMax) +
-     (m_rowMin & m_colMax) + (m_rowMax & m_planeMin) + (m_colMax & m_planeMin)) *
-    maxPlaneSize * MAX_FIELDS_PER_MPI_COMM;
-
-  // account for corner communication
-  // factor of 16 is so each buffer has its own cache line
-  comBufSize += ((m_rowMin & m_colMin & m_planeMin) +
-                 (m_rowMin & m_colMin & m_planeMax) +
-                 (m_rowMin & m_colMax & m_planeMin) +
-                 (m_rowMin & m_colMax & m_planeMax) +
-                 (m_rowMax & m_colMin & m_planeMin) +
-                 (m_rowMax & m_colMin & m_planeMax) +
-                 (m_rowMax & m_colMax & m_planeMin) +
-                 (m_rowMax & m_colMax & m_planeMax)) *
-                CACHE_COHERENCE_PAD_REAL;
-
-  this->commDataSend = new Real_t[comBufSize];
-  this->commDataRecv = new Real_t[comBufSize];
-
-  // pin buffers
-  cudaHostRegister(this->commDataSend, comBufSize * sizeof(Real_t), 0);
-  cudaHostRegister(this->commDataRecv, comBufSize * sizeof(Real_t), 0);
-
-  // prevent floating point exceptions
-  memset(this->commDataSend, 0, comBufSize * sizeof(Real_t));
-  memset(this->commDataRecv, 0, comBufSize * sizeof(Real_t));
-
-  // allocate shadow GPU buffers
-  cudaMalloc(&this->d_commDataSend, comBufSize * sizeof(Real_t));
-  cudaMalloc(&this->d_commDataRecv, comBufSize * sizeof(Real_t));
-
-  // prevent floating point exceptions
-  cudaMemset(this->d_commDataSend, 0, comBufSize * sizeof(Real_t));
-  cudaMemset(this->d_commDataRecv, 0, comBufSize * sizeof(Real_t));
-#endif
 }
 
 void SetupConnectivityBC(Domain* domain, int edgeElems) {
@@ -520,13 +462,10 @@ void SetupConnectivityBC(Domain* domain, int edgeElems) {
       }
 
       if (domain->m_planeLoc == domain->m_tp - 1) {
-        elemBC_h[rowInc + j + domElems - edgeElems * edgeElems] |=
-          ZETA_P_FREE;
+        elemBC_h[rowInc + j + domElems - edgeElems * edgeElems] |= ZETA_P_FREE;
       } else {
-        elemBC_h[rowInc + j + domElems - edgeElems * edgeElems] |=
-          ZETA_P_COMM;
-        lzetap_h[rowInc + j + domElems - edgeElems * edgeElems] =
-          ghostIdx[1] + rowInc + j;
+        elemBC_h[rowInc + j + domElems - edgeElems * edgeElems] |= ZETA_P_COMM;
+        lzetap_h[rowInc + j + domElems - edgeElems * edgeElems] = ghostIdx[1] + rowInc + j;
       }
 
       if (domain->m_rowLoc == 0) {
@@ -537,13 +476,10 @@ void SetupConnectivityBC(Domain* domain, int edgeElems) {
       }
 
       if (domain->m_rowLoc == domain->m_tp - 1) {
-        elemBC_h[planeInc + j + edgeElems * edgeElems - edgeElems] |=
-          ETA_P_FREE;
+        elemBC_h[planeInc + j + edgeElems * edgeElems - edgeElems] |= ETA_P_FREE;
       } else {
-        elemBC_h[planeInc + j + edgeElems * edgeElems - edgeElems] |=
-          ETA_P_COMM;
-        letap_h[planeInc + j + edgeElems * edgeElems - edgeElems] =
-          ghostIdx[3] + rowInc + j;
+        elemBC_h[planeInc + j + edgeElems * edgeElems - edgeElems] |= ETA_P_COMM;
+        letap_h[planeInc + j + edgeElems * edgeElems - edgeElems] = ghostIdx[3] + rowInc + j;
       }
 
       if (domain->m_colLoc == 0) {
@@ -557,8 +493,7 @@ void SetupConnectivityBC(Domain* domain, int edgeElems) {
         elemBC_h[planeInc + j * edgeElems + edgeElems - 1] |= XI_P_FREE;
       } else {
         elemBC_h[planeInc + j * edgeElems + edgeElems - 1] |= XI_P_COMM;
-        lxip_h[planeInc + j * edgeElems + edgeElems - 1] =
-          ghostIdx[5] + rowInc + j;
+        lxip_h[planeInc + j * edgeElems + edgeElems - 1] = ghostIdx[5] + rowInc + j;
       }
     }
   }
@@ -944,8 +879,7 @@ Domain* NewDomain(char* argv[], Int_t numRanks, Index_t colLoc, Index_t rowLoc, 
 
   nodeElemStart_h[0] = 0;
   for (Index_t i = 1; i < domNodes; ++i) {
-    nodeElemStart_h[i] =
-      nodeElemStart_h[i - 1] + nodeElemCount_h[i - 1];
+    nodeElemStart_h[i] = nodeElemStart_h[i - 1] + nodeElemCount_h[i - 1];
   }
 
   Vector_h<Index_t> nodeElemCornerList_h(nodeElemStart_h[domNodes - 1] + nodeElemCount_h[domNodes - 1]);
@@ -958,15 +892,13 @@ Domain* NewDomain(char* argv[], Int_t numRanks, Index_t colLoc, Index_t rowLoc, 
     for (Index_t i = 0; i < domElems; ++i) {
       Index_t m = nodelist_h[padded_domElems * j + i];
       Index_t k = padded_domElems * j + i;
-      Index_t offset = nodeElemStart_h[m] +
-                       nodeElemCount_h[m];
+      Index_t offset = nodeElemStart_h[m] + nodeElemCount_h[m];
       nodeElemCornerList_h[offset] = k;
       ++(nodeElemCount_h[m]);
     }
   }
 
-  Index_t clSize = nodeElemStart_h[domNodes - 1] +
-                   nodeElemCount_h[domNodes - 1];
+  Index_t clSize = nodeElemStart_h[domNodes - 1] + nodeElemCount_h[domNodes - 1];
   for (Index_t i = 0; i < clSize; ++i) {
     Index_t clv = nodeElemCornerList_h[i];
     if ((clv < 0) || (clv > padded_domElems * 8)) {
@@ -1129,14 +1061,9 @@ static Int_t POW(Int_t x, Int_t y) {
 }
 
 void Domain::CreateRegionIndexSets(Int_t nr, Int_t b) {
-#if USE_MPI
-  Index_t myRank;
-  MPI_Comm_rank(MPI_COMM_WORLD, &myRank);
-  srand(myRank);
-#else
   srand(0);
   Index_t myRank = 0;
-#endif
+
   numReg = nr;
   balance = b;
 
@@ -1279,11 +1206,7 @@ static inline void TimeIncrement(Domain* domain) {
       gnewdt = *(domain->dthydro_h) * Real_t(2.0) / Real_t(3.0);
     }
 
-#if USE_MPI
-    MPI_Allreduce(&gnewdt, &newdt, 1, ((sizeof(Real_t) == 4) ? MPI_FLOAT : MPI_DOUBLE), MPI_MIN, MPI_COMM_WORLD);
-#else
     newdt = gnewdt;
-#endif
 
     Real_t olddt = domain->deltatime_h;
     ratio = newdt / olddt;
@@ -1543,20 +1466,11 @@ static __device__
   VoluDer(const Real_t x0, const Real_t x1, const Real_t x2, const Real_t x3, const Real_t x4, const Real_t x5, const Real_t y0, const Real_t y1, const Real_t y2, const Real_t y3, const Real_t y4, const Real_t y5, const Real_t z0, const Real_t z1, const Real_t z2, const Real_t z3, const Real_t z4, const Real_t z5, Real_t* dvdx, Real_t* dvdy, Real_t* dvdz) {
   const Real_t twelfth = Real_t(1.0) / Real_t(12.0);
 
-  *dvdx =
-    (y1 + y2) * (z0 + z1) - (y0 + y1) * (z1 + z2) +
-    (y0 + y4) * (z3 + z4) - (y3 + y4) * (z0 + z4) -
-    (y2 + y5) * (z3 + z5) + (y3 + y5) * (z2 + z5);
+  *dvdx = (y1 + y2) * (z0 + z1) - (y0 + y1) * (z1 + z2) + (y0 + y4) * (z3 + z4) - (y3 + y4) * (z0 + z4) - (y2 + y5) * (z3 + z5) + (y3 + y5) * (z2 + z5);
 
-  *dvdy =
-    -(x1 + x2) * (z0 + z1) + (x0 + x1) * (z1 + z2) -
-    (x0 + x4) * (z3 + z4) + (x3 + x4) * (z0 + z4) +
-    (x2 + x5) * (z3 + z5) - (x3 + x5) * (z2 + z5);
+  *dvdy = -(x1 + x2) * (z0 + z1) + (x0 + x1) * (z1 + z2) - (x0 + x4) * (z3 + z4) + (x3 + x4) * (z0 + z4) + (x2 + x5) * (z3 + z5) - (x3 + x5) * (z2 + z5);
 
-  *dvdz =
-    -(y1 + y2) * (x0 + x1) + (y0 + y1) * (x1 + x2) -
-    (y0 + y4) * (x3 + x4) + (y3 + y4) * (x0 + x4) +
-    (y2 + y5) * (x3 + x5) - (y3 + y5) * (x2 + x5);
+  *dvdz = -(y1 + y2) * (x0 + x1) + (y0 + y1) * (x1 + x2) - (y0 + y4) * (x3 + x4) + (y3 + y4) * (x0 + x4) + (y2 + y5) * (x3 + x5) - (y3 + y5) * (x2 + x5);
 
   *dvdx *= twelfth;
   *dvdy *= twelfth;
@@ -1584,173 +1498,77 @@ static __device__
   Index_t i02 = 2;
   Index_t i03 = 3;
 
-  Real_t h00 =
-    hourgam0[i00] * xd[0] + hourgam1[i00] * xd[1] +
-    hourgam2[i00] * xd[2] + hourgam3[i00] * xd[3] +
-    hourgam4[i00] * xd[4] + hourgam5[i00] * xd[5] +
-    hourgam6[i00] * xd[6] + hourgam7[i00] * xd[7];
+  Real_t h00 = hourgam0[i00] * xd[0] + hourgam1[i00] * xd[1] + hourgam2[i00] * xd[2] + hourgam3[i00] * xd[3] + hourgam4[i00] * xd[4] + hourgam5[i00] * xd[5] + hourgam6[i00] * xd[6] + hourgam7[i00] * xd[7];
 
-  Real_t h01 =
-    hourgam0[i01] * xd[0] + hourgam1[i01] * xd[1] +
-    hourgam2[i01] * xd[2] + hourgam3[i01] * xd[3] +
-    hourgam4[i01] * xd[4] + hourgam5[i01] * xd[5] +
-    hourgam6[i01] * xd[6] + hourgam7[i01] * xd[7];
+  Real_t h01 = hourgam0[i01] * xd[0] + hourgam1[i01] * xd[1] + hourgam2[i01] * xd[2] + hourgam3[i01] * xd[3] + hourgam4[i01] * xd[4] + hourgam5[i01] * xd[5] + hourgam6[i01] * xd[6] + hourgam7[i01] * xd[7];
 
-  Real_t h02 =
-    hourgam0[i02] * xd[0] + hourgam1[i02] * xd[1] +
-    hourgam2[i02] * xd[2] + hourgam3[i02] * xd[3] +
-    hourgam4[i02] * xd[4] + hourgam5[i02] * xd[5] +
-    hourgam6[i02] * xd[6] + hourgam7[i02] * xd[7];
+  Real_t h02 = hourgam0[i02] * xd[0] + hourgam1[i02] * xd[1] + hourgam2[i02] * xd[2] + hourgam3[i02] * xd[3] + hourgam4[i02] * xd[4] + hourgam5[i02] * xd[5] + hourgam6[i02] * xd[6] + hourgam7[i02] * xd[7];
 
-  Real_t h03 =
-    hourgam0[i03] * xd[0] + hourgam1[i03] * xd[1] +
-    hourgam2[i03] * xd[2] + hourgam3[i03] * xd[3] +
-    hourgam4[i03] * xd[4] + hourgam5[i03] * xd[5] +
-    hourgam6[i03] * xd[6] + hourgam7[i03] * xd[7];
+  Real_t h03 = hourgam0[i03] * xd[0] + hourgam1[i03] * xd[1] + hourgam2[i03] * xd[2] + hourgam3[i03] * xd[3] + hourgam4[i03] * xd[4] + hourgam5[i03] * xd[5] + hourgam6[i03] * xd[6] + hourgam7[i03] * xd[7];
 
-  hgfx[0] += coefficient *
-             (hourgam0[i00] * h00 + hourgam0[i01] * h01 +
-              hourgam0[i02] * h02 + hourgam0[i03] * h03);
+  hgfx[0] += coefficient * (hourgam0[i00] * h00 + hourgam0[i01] * h01 + hourgam0[i02] * h02 + hourgam0[i03] * h03);
 
-  hgfx[1] += coefficient *
-             (hourgam1[i00] * h00 + hourgam1[i01] * h01 +
-              hourgam1[i02] * h02 + hourgam1[i03] * h03);
+  hgfx[1] += coefficient * (hourgam1[i00] * h00 + hourgam1[i01] * h01 + hourgam1[i02] * h02 + hourgam1[i03] * h03);
 
-  hgfx[2] += coefficient *
-             (hourgam2[i00] * h00 + hourgam2[i01] * h01 +
-              hourgam2[i02] * h02 + hourgam2[i03] * h03);
+  hgfx[2] += coefficient * (hourgam2[i00] * h00 + hourgam2[i01] * h01 + hourgam2[i02] * h02 + hourgam2[i03] * h03);
 
-  hgfx[3] += coefficient *
-             (hourgam3[i00] * h00 + hourgam3[i01] * h01 +
-              hourgam3[i02] * h02 + hourgam3[i03] * h03);
+  hgfx[3] += coefficient * (hourgam3[i00] * h00 + hourgam3[i01] * h01 + hourgam3[i02] * h02 + hourgam3[i03] * h03);
 
-  hgfx[4] += coefficient *
-             (hourgam4[i00] * h00 + hourgam4[i01] * h01 +
-              hourgam4[i02] * h02 + hourgam4[i03] * h03);
+  hgfx[4] += coefficient * (hourgam4[i00] * h00 + hourgam4[i01] * h01 + hourgam4[i02] * h02 + hourgam4[i03] * h03);
 
-  hgfx[5] += coefficient *
-             (hourgam5[i00] * h00 + hourgam5[i01] * h01 +
-              hourgam5[i02] * h02 + hourgam5[i03] * h03);
+  hgfx[5] += coefficient * (hourgam5[i00] * h00 + hourgam5[i01] * h01 + hourgam5[i02] * h02 + hourgam5[i03] * h03);
 
-  hgfx[6] += coefficient *
-             (hourgam6[i00] * h00 + hourgam6[i01] * h01 +
-              hourgam6[i02] * h02 + hourgam6[i03] * h03);
+  hgfx[6] += coefficient * (hourgam6[i00] * h00 + hourgam6[i01] * h01 + hourgam6[i02] * h02 + hourgam6[i03] * h03);
 
-  hgfx[7] += coefficient *
-             (hourgam7[i00] * h00 + hourgam7[i01] * h01 +
-              hourgam7[i02] * h02 + hourgam7[i03] * h03);
+  hgfx[7] += coefficient * (hourgam7[i00] * h00 + hourgam7[i01] * h01 + hourgam7[i02] * h02 + hourgam7[i03] * h03);
 
-  h00 =
-    hourgam0[i00] * yd[0] + hourgam1[i00] * yd[1] +
-    hourgam2[i00] * yd[2] + hourgam3[i00] * yd[3] +
-    hourgam4[i00] * yd[4] + hourgam5[i00] * yd[5] +
-    hourgam6[i00] * yd[6] + hourgam7[i00] * yd[7];
+  h00 = hourgam0[i00] * yd[0] + hourgam1[i00] * yd[1] + hourgam2[i00] * yd[2] + hourgam3[i00] * yd[3] + hourgam4[i00] * yd[4] + hourgam5[i00] * yd[5] + hourgam6[i00] * yd[6] + hourgam7[i00] * yd[7];
 
-  h01 =
-    hourgam0[i01] * yd[0] + hourgam1[i01] * yd[1] +
-    hourgam2[i01] * yd[2] + hourgam3[i01] * yd[3] +
-    hourgam4[i01] * yd[4] + hourgam5[i01] * yd[5] +
-    hourgam6[i01] * yd[6] + hourgam7[i01] * yd[7];
+  h01 = hourgam0[i01] * yd[0] + hourgam1[i01] * yd[1] + hourgam2[i01] * yd[2] + hourgam3[i01] * yd[3] + hourgam4[i01] * yd[4] + hourgam5[i01] * yd[5] + hourgam6[i01] * yd[6] + hourgam7[i01] * yd[7];
 
-  h02 =
-    hourgam0[i02] * yd[0] + hourgam1[i02] * yd[1] +
-    hourgam2[i02] * yd[2] + hourgam3[i02] * yd[3] +
-    hourgam4[i02] * yd[4] + hourgam5[i02] * yd[5] +
-    hourgam6[i02] * yd[6] + hourgam7[i02] * yd[7];
+  h02 = hourgam0[i02] * yd[0] + hourgam1[i02] * yd[1] + hourgam2[i02] * yd[2] + hourgam3[i02] * yd[3] + hourgam4[i02] * yd[4] + hourgam5[i02] * yd[5] + hourgam6[i02] * yd[6] + hourgam7[i02] * yd[7];
 
-  h03 =
-    hourgam0[i03] * yd[0] + hourgam1[i03] * yd[1] +
-    hourgam2[i03] * yd[2] + hourgam3[i03] * yd[3] +
-    hourgam4[i03] * yd[4] + hourgam5[i03] * yd[5] +
-    hourgam6[i03] * yd[6] + hourgam7[i03] * yd[7];
+  h03 = hourgam0[i03] * yd[0] + hourgam1[i03] * yd[1] + hourgam2[i03] * yd[2] + hourgam3[i03] * yd[3] + hourgam4[i03] * yd[4] + hourgam5[i03] * yd[5] + hourgam6[i03] * yd[6] + hourgam7[i03] * yd[7];
 
-  hgfy[0] += coefficient *
-             (hourgam0[i00] * h00 + hourgam0[i01] * h01 +
-              hourgam0[i02] * h02 + hourgam0[i03] * h03);
+  hgfy[0] += coefficient * (hourgam0[i00] * h00 + hourgam0[i01] * h01 + hourgam0[i02] * h02 + hourgam0[i03] * h03);
 
-  hgfy[1] += coefficient *
-             (hourgam1[i00] * h00 + hourgam1[i01] * h01 +
-              hourgam1[i02] * h02 + hourgam1[i03] * h03);
+  hgfy[1] += coefficient * (hourgam1[i00] * h00 + hourgam1[i01] * h01 + hourgam1[i02] * h02 + hourgam1[i03] * h03);
 
-  hgfy[2] += coefficient *
-             (hourgam2[i00] * h00 + hourgam2[i01] * h01 +
-              hourgam2[i02] * h02 + hourgam2[i03] * h03);
+  hgfy[2] += coefficient * (hourgam2[i00] * h00 + hourgam2[i01] * h01 + hourgam2[i02] * h02 + hourgam2[i03] * h03);
 
-  hgfy[3] += coefficient *
-             (hourgam3[i00] * h00 + hourgam3[i01] * h01 +
-              hourgam3[i02] * h02 + hourgam3[i03] * h03);
+  hgfy[3] += coefficient * (hourgam3[i00] * h00 + hourgam3[i01] * h01 + hourgam3[i02] * h02 + hourgam3[i03] * h03);
 
-  hgfy[4] += coefficient *
-             (hourgam4[i00] * h00 + hourgam4[i01] * h01 +
-              hourgam4[i02] * h02 + hourgam4[i03] * h03);
+  hgfy[4] += coefficient * (hourgam4[i00] * h00 + hourgam4[i01] * h01 + hourgam4[i02] * h02 + hourgam4[i03] * h03);
 
-  hgfy[5] += coefficient *
-             (hourgam5[i00] * h00 + hourgam5[i01] * h01 +
-              hourgam5[i02] * h02 + hourgam5[i03] * h03);
+  hgfy[5] += coefficient * (hourgam5[i00] * h00 + hourgam5[i01] * h01 + hourgam5[i02] * h02 + hourgam5[i03] * h03);
 
-  hgfy[6] += coefficient *
-             (hourgam6[i00] * h00 + hourgam6[i01] * h01 +
-              hourgam6[i02] * h02 + hourgam6[i03] * h03);
+  hgfy[6] += coefficient * (hourgam6[i00] * h00 + hourgam6[i01] * h01 + hourgam6[i02] * h02 + hourgam6[i03] * h03);
 
-  hgfy[7] += coefficient *
-             (hourgam7[i00] * h00 + hourgam7[i01] * h01 +
-              hourgam7[i02] * h02 + hourgam7[i03] * h03);
+  hgfy[7] += coefficient * (hourgam7[i00] * h00 + hourgam7[i01] * h01 + hourgam7[i02] * h02 + hourgam7[i03] * h03);
 
-  h00 =
-    hourgam0[i00] * zd[0] + hourgam1[i00] * zd[1] +
-    hourgam2[i00] * zd[2] + hourgam3[i00] * zd[3] +
-    hourgam4[i00] * zd[4] + hourgam5[i00] * zd[5] +
-    hourgam6[i00] * zd[6] + hourgam7[i00] * zd[7];
+  h00 = hourgam0[i00] * zd[0] + hourgam1[i00] * zd[1] + hourgam2[i00] * zd[2] + hourgam3[i00] * zd[3] + hourgam4[i00] * zd[4] + hourgam5[i00] * zd[5] + hourgam6[i00] * zd[6] + hourgam7[i00] * zd[7];
 
-  h01 =
-    hourgam0[i01] * zd[0] + hourgam1[i01] * zd[1] +
-    hourgam2[i01] * zd[2] + hourgam3[i01] * zd[3] +
-    hourgam4[i01] * zd[4] + hourgam5[i01] * zd[5] +
-    hourgam6[i01] * zd[6] + hourgam7[i01] * zd[7];
+  h01 = hourgam0[i01] * zd[0] + hourgam1[i01] * zd[1] + hourgam2[i01] * zd[2] + hourgam3[i01] * zd[3] + hourgam4[i01] * zd[4] + hourgam5[i01] * zd[5] + hourgam6[i01] * zd[6] + hourgam7[i01] * zd[7];
 
-  h02 =
-    hourgam0[i02] * zd[0] + hourgam1[i02] * zd[1] +
-    hourgam2[i02] * zd[2] + hourgam3[i02] * zd[3] +
-    hourgam4[i02] * zd[4] + hourgam5[i02] * zd[5] +
-    hourgam6[i02] * zd[6] + hourgam7[i02] * zd[7];
+  h02 = hourgam0[i02] * zd[0] + hourgam1[i02] * zd[1] + hourgam2[i02] * zd[2] + hourgam3[i02] * zd[3] + hourgam4[i02] * zd[4] + hourgam5[i02] * zd[5] + hourgam6[i02] * zd[6] + hourgam7[i02] * zd[7];
 
-  h03 =
-    hourgam0[i03] * zd[0] + hourgam1[i03] * zd[1] +
-    hourgam2[i03] * zd[2] + hourgam3[i03] * zd[3] +
-    hourgam4[i03] * zd[4] + hourgam5[i03] * zd[5] +
-    hourgam6[i03] * zd[6] + hourgam7[i03] * zd[7];
+  h03 = hourgam0[i03] * zd[0] + hourgam1[i03] * zd[1] + hourgam2[i03] * zd[2] + hourgam3[i03] * zd[3] + hourgam4[i03] * zd[4] + hourgam5[i03] * zd[5] + hourgam6[i03] * zd[6] + hourgam7[i03] * zd[7];
 
-  hgfz[0] += coefficient *
-             (hourgam0[i00] * h00 + hourgam0[i01] * h01 +
-              hourgam0[i02] * h02 + hourgam0[i03] * h03);
+  hgfz[0] += coefficient * (hourgam0[i00] * h00 + hourgam0[i01] * h01 + hourgam0[i02] * h02 + hourgam0[i03] * h03);
 
-  hgfz[1] += coefficient *
-             (hourgam1[i00] * h00 + hourgam1[i01] * h01 +
-              hourgam1[i02] * h02 + hourgam1[i03] * h03);
+  hgfz[1] += coefficient * (hourgam1[i00] * h00 + hourgam1[i01] * h01 + hourgam1[i02] * h02 + hourgam1[i03] * h03);
 
-  hgfz[2] += coefficient *
-             (hourgam2[i00] * h00 + hourgam2[i01] * h01 +
-              hourgam2[i02] * h02 + hourgam2[i03] * h03);
+  hgfz[2] += coefficient * (hourgam2[i00] * h00 + hourgam2[i01] * h01 + hourgam2[i02] * h02 + hourgam2[i03] * h03);
 
-  hgfz[3] += coefficient *
-             (hourgam3[i00] * h00 + hourgam3[i01] * h01 +
-              hourgam3[i02] * h02 + hourgam3[i03] * h03);
+  hgfz[3] += coefficient * (hourgam3[i00] * h00 + hourgam3[i01] * h01 + hourgam3[i02] * h02 + hourgam3[i03] * h03);
 
-  hgfz[4] += coefficient *
-             (hourgam4[i00] * h00 + hourgam4[i01] * h01 +
-              hourgam4[i02] * h02 + hourgam4[i03] * h03);
+  hgfz[4] += coefficient * (hourgam4[i00] * h00 + hourgam4[i01] * h01 + hourgam4[i02] * h02 + hourgam4[i03] * h03);
 
-  hgfz[5] += coefficient *
-             (hourgam5[i00] * h00 + hourgam5[i01] * h01 +
-              hourgam5[i02] * h02 + hourgam5[i03] * h03);
+  hgfz[5] += coefficient * (hourgam5[i00] * h00 + hourgam5[i01] * h01 + hourgam5[i02] * h02 + hourgam5[i03] * h03);
 
-  hgfz[6] += coefficient *
-             (hourgam6[i00] * h00 + hourgam6[i01] * h01 +
-              hourgam6[i02] * h02 + hourgam6[i03] * h03);
+  hgfz[6] += coefficient * (hourgam6[i00] * h00 + hourgam6[i01] * h01 + hourgam6[i02] * h02 + hourgam6[i03] * h03);
 
-  hgfz[7] += coefficient *
-             (hourgam7[i00] * h00 + hourgam7[i01] * h01 +
-              hourgam7[i02] * h02 + hourgam7[i03] * h03);
+  hgfz[7] += coefficient * (hourgam7[i00] * h00 + hourgam7[i01] * h01 + hourgam7[i02] * h02 + hourgam7[i03] * h03);
 }
 
 __device__
@@ -2432,7 +2250,7 @@ static inline void CalcVolumeForceForElems(const Real_t hgcoef, Domain* domain) 
 #ifdef DOUBLE_PRECISION
                                                                   fx_elem->raw(), fy_elem->raw(), fz_elem->raw(),
 #else
-                                                                     domain->fx.raw(), domain->fy.raw(), domain->fz.raw(),
+                                                                  domain->fx.raw(), domain->fy.raw(), domain->fz.raw(),
 #endif
                                                                   domain->bad_vol_h, num_threads);
   } else {
@@ -2440,7 +2258,7 @@ static inline void CalcVolumeForceForElems(const Real_t hgcoef, Domain* domain) 
 #ifdef DOUBLE_PRECISION
                                                                    fx_elem->raw(), fy_elem->raw(), fz_elem->raw(),
 #else
-                                                                      domain->fx.raw(), domain->fy.raw(), domain->fz.raw(),
+                                                                   domain->fx.raw(), domain->fy.raw(), domain->fz.raw(),
 #endif
                                                                    domain->bad_vol_h, num_threads);
   }
@@ -2604,29 +2422,10 @@ static inline void checkErrors(Domain* domain, int its, int myRank) {
 }
 
 static inline void CalcForceForNodes(Domain* domain) {
-#if USE_MPI
-  CommRecv(*domain, MSG_COMM_SBN, 3, domain->sizeX + 1, domain->sizeY + 1, domain->sizeZ + 1, true, false);
-#endif
-
   CalcVolumeForceForElems(domain);
 
   // moved here from the main loop to allow async execution with GPU work
   TimeIncrement(domain);
-
-#if USE_MPI
-  // initialize pointers
-  domain->d_fx = domain->fx.raw();
-  domain->d_fy = domain->fy.raw();
-  domain->d_fz = domain->fz.raw();
-
-  Domain_member fieldData[3];
-  fieldData[0] = &Domain::get_fx;
-  fieldData[1] = &Domain::get_fy;
-  fieldData[2] = &Domain::get_fz;
-
-  CommSendGpu(*domain, MSG_COMM_SBN, 3, fieldData, domain->sizeX + 1, domain->sizeY + 1, domain->sizeZ + 1, true, false, domain->streams[2]);
-  CommSBNGpu(*domain, 3, fieldData, &domain->streams[2]);
-#endif
 }
 
 __global__ void CalcAccelerationForNodes_kernel(int numNode, Real_t* xdd, Real_t* ydd, Real_t* zdd, Real_t* fx, Real_t* fy, Real_t* fz, Real_t* nodalMass) {
@@ -2720,40 +2519,11 @@ static inline void LagrangeNodal(Domain* domain) {
    * acceleration boundary conditions. */
   CalcForceForNodes(domain);
 
-#if USE_MPI
-  #ifdef SEDOV_SYNC_POS_VEL_EARLY
-  CommRecv(*domain, MSG_SYNC_POS_VEL, 6, domain->sizeX + 1, domain->sizeY + 1, domain->sizeZ + 1, false, false);
-  #endif
-#endif
-
   CalcAccelerationForNodes(domain);
 
   ApplyAccelerationBoundaryConditionsForNodes(domain);
 
   CalcPositionAndVelocityForNodes(u_cut, domain);
-
-#if USE_MPI
-  #ifdef SEDOV_SYNC_POS_VEL_EARLY
-  // initialize pointers
-  domain->d_x = domain->x.raw();
-  domain->d_y = domain->y.raw();
-  domain->d_z = domain->z.raw();
-
-  domain->d_xd = domain->xd.raw();
-  domain->d_yd = domain->yd.raw();
-  domain->d_zd = domain->zd.raw();
-
-  fieldData[0] = &Domain::get_x;
-  fieldData[1] = &Domain::get_y;
-  fieldData[2] = &Domain::get_z;
-  fieldData[3] = &Domain::get_xd;
-  fieldData[4] = &Domain::get_yd;
-  fieldData[5] = &Domain::get_zd;
-
-  CommSendGpu(*domain, MSG_SYNC_POS_VEL, 6, fieldData, domain->sizeX + 1, domain->sizeY + 1, domain->sizeZ + 1, false, false, domain->streams[2]);
-  CommSyncPosVelGpu(*domain, &domain->streams[2]);
-  #endif
-#endif
 
   return;
 }
@@ -2766,10 +2536,7 @@ __device__ static inline Real_t AreaFace(const Real_t x0, const Real_t x1, const
   Real_t gy = (y2 - y0) + (y3 - y1);
   Real_t gz = (z2 - z0) + (z3 - z1);
   Real_t temp = (fx * gx + fy * gy + fz * gz);
-  Real_t area =
-    (fx * fx + fy * fy + fz * fz) *
-      (gx * gx + gy * gy + gz * gz) -
-    temp * temp;
+  Real_t area = (fx * fx + fy * fy + fz * fz) * (gx * gx + gy * gy + gz * gz) - temp * temp;
   return area;
 }
 
@@ -3292,15 +3059,9 @@ __launch_bounds__(128, 16)
 
       Real_t rho = elemMass[i] / (volo[i] * vnew[i]);
 
-      qlin = -qlc_monoq * rho *
-             (delvxxi * (Real_t(1.) - phixi) +
-              delvxeta * (Real_t(1.) - phieta) +
-              delvxzeta * (Real_t(1.) - phizeta));
+      qlin = -qlc_monoq * rho * (delvxxi * (Real_t(1.) - phixi) + delvxeta * (Real_t(1.) - phieta) + delvxzeta * (Real_t(1.) - phizeta));
 
-      qquad = qqc_monoq * rho *
-              (delvxxi * delvxxi * (Real_t(1.) - phixi * phixi) +
-               delvxeta * delvxeta * (Real_t(1.) - phieta * phieta) +
-               delvxzeta * delvxzeta * (Real_t(1.) - phizeta * phizeta));
+      qquad = qqc_monoq * rho * (delvxxi * delvxxi * (Real_t(1.) - phixi * phixi) + delvxeta * delvxeta * (Real_t(1.) - phieta * phieta) + delvxzeta * delvxzeta * (Real_t(1.) - phizeta * phizeta));
     }
 
     qq[i] = qquad;
@@ -3358,9 +3119,7 @@ static __device__ __forceinline__ void CalcPressureForElems_device(
 }
 
 static __device__ __forceinline__ void CalcSoundSpeedForElems_device(Real_t& vnewc, Real_t rho0, Real_t& enewc, Real_t& pnewc, Real_t& pbvc, Real_t& bvc, Real_t ss4o3, Index_t nz, Real_t* ss, Index_t iz) {
-  Real_t ssTmp = (pbvc * enewc + vnewc * vnewc *
-                                   bvc * pnewc) /
-                 rho0;
+  Real_t ssTmp = (pbvc * enewc + vnewc * vnewc * bvc * pnewc) / rho0;
   if (ssTmp <= Real_t(.1111111e-36)) {
     ssTmp = Real_t(.3333333e-18);
   } else {
@@ -3640,30 +3399,10 @@ static inline void LagrangeElements(Domain* domain) {
   domain->delv_eta = Allocator<Vector_d<Real_t>>::allocate(allElem);
   domain->delv_zeta = Allocator<Vector_d<Real_t>>::allocate(allElem);
 
-#if USE_MPI
-  CommRecv(*domain, MSG_MONOQ, 3, domain->sizeX, domain->sizeY, domain->sizeZ, true, true);
-#endif
-
   /*********************************************/
   /*  Calc Kinematics and Monotic Q Gradient   */
   /*********************************************/
   CalcKinematicsAndMonotonicQGradient(domain);
-
-#if USE_MPI
-  Domain_member fieldData[3];
-
-  // initialize pointers
-  domain->d_delv_xi = domain->delv_xi->raw();
-  domain->d_delv_eta = domain->delv_eta->raw();
-  domain->d_delv_zeta = domain->delv_zeta->raw();
-
-  fieldData[0] = &Domain::get_delv_xi;
-  fieldData[1] = &Domain::get_delv_eta;
-  fieldData[2] = &Domain::get_delv_zeta;
-
-  CommSendGpu(*domain, MSG_MONOQ, 3, fieldData, domain->sizeX, domain->sizeY, domain->sizeZ, true, true, domain->streams[2]);
-  CommMonoQGpu(*domain, domain->streams[2]);
-#endif
 
   Allocator<Vector_d<Real_t>>::free(domain->dxx, domain->numElem);
   Allocator<Vector_d<Real_t>>::free(domain->dyy, domain->numElem);
@@ -4136,27 +3875,15 @@ void InitMeshDecomp(Int_t numRanks, Int_t myRank, Int_t* col, Int_t* row, Int_t*
   testProcs = Int_t(cbrt(Real_t(numRanks)) + 0.5);
   if (testProcs * testProcs * testProcs != numRanks) {
     printf("Num processors must be a cube of an integer (1, 8, 27, ...)\n");
-#if USE_MPI
-    MPI_Abort(MPI_COMM_WORLD, -1);
-#else
     exit(-1);
-#endif
   }
   if (sizeof(Real_t) != 4 && sizeof(Real_t) != 8) {
     printf("MPI operations only support float and double right now...\n");
-#if USE_MPI
-    MPI_Abort(MPI_COMM_WORLD, -1);
-#else
     exit(-1);
-#endif
   }
   if (MAX_FIELDS_PER_MPI_COMM > CACHE_COHERENCE_PAD_REAL) {
     printf("corner element comm buffers too small.  Fix code.\n");
-#if USE_MPI
-    MPI_Abort(MPI_COMM_WORLD, -1);
-#else
     exit(-1);
-#endif
   }
 
   dx = testProcs;
@@ -4166,18 +3893,13 @@ void InitMeshDecomp(Int_t numRanks, Int_t myRank, Int_t* col, Int_t* row, Int_t*
   // temporary test
   if (dx * dy * dz != numRanks) {
     printf("error -- must have as many domains as procs\n");
-#if USE_MPI
-    MPI_Abort(MPI_COMM_WORLD, -1);
-#else
     exit(-1);
-#endif
   }
   Int_t remainder = dx * dy * dz % numRanks;
   if (myRank < remainder) {
     myDom = myRank * (1 + (dx * dy * dz / numRanks));
   } else {
-    myDom = remainder * (1 + (dx * dy * dz / numRanks)) +
-            (myRank - remainder) * (dx * dy * dz / numRanks);
+    myDom = remainder * (1 + (dx * dy * dz / numRanks)) + (myRank - remainder) * (dx * dy * dz / numRanks);
   }
 
   *col = myDom % dx;
@@ -4281,16 +4003,8 @@ int main(int argc, char* argv[]) {
   Int_t numRanks;
   Int_t myRank;
 
-#if USE_MPI
-  Domain_member fieldData;
-
-  MPI_Init(&argc, &argv);
-  MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
-  MPI_Comm_rank(MPI_COMM_WORLD, &myRank);
-#else
   numRanks = 1;
   myRank = 0;
-#endif
 
   cuda_init(myRank);
 
@@ -4312,24 +4026,6 @@ int main(int argc, char* argv[]) {
   // TODO: setup communication buffers
   locDom = NewDomain(argv, numRanks, col, row, plane, nx, side, structured, nr, balance, cost);
 
-#if USE_MPI
-  // copy to the host for mpi transfer
-  locDom->h_nodalMass = locDom->nodalMass;
-
-  fieldData = &Domain::get_nodalMass;
-
-  // Initial domain boundary communication
-  CommRecv(*locDom, MSG_COMM_SBN, 1, locDom->sizeX + 1, locDom->sizeY + 1, locDom->sizeZ + 1, true, false);
-  CommSend(*locDom, MSG_COMM_SBN, 1, &fieldData, locDom->sizeX + 1, locDom->sizeY + 1, locDom->sizeZ + 1, true, false);
-  CommSBN(*locDom, 1, &fieldData);
-
-  // copy back to the device
-  locDom->nodalMass = locDom->h_nodalMass;
-
-  // End initialization
-  MPI_Barrier(MPI_COMM_WORLD);
-#endif
-
   cudaDeviceSetCacheConfig(cudaFuncCachePreferL1);
 
   /* timestep to solution */
@@ -4344,12 +4040,8 @@ int main(int argc, char* argv[]) {
 
   cudaProfilerStart();
 
-#if USE_MPI
-  double start = MPI_Wtime();
-#else
   timeval start;
   gettimeofday(&start, NULL);
-#endif
 
   while (locDom->time_h < locDom->stoptime) {
     // this has been moved after computation of volume forces to hide launch latencies
@@ -4372,20 +4064,12 @@ int main(int argc, char* argv[]) {
 
   // Use reduced max elapsed time
   double elapsed_time;
-#if USE_MPI
-  elapsed_time = MPI_Wtime() - start;
-#else
   timeval end;
   gettimeofday(&end, NULL);
   elapsed_time = (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_usec - start.tv_usec)) / 1000000;
-#endif
 
   double elapsed_timeG;
-#if USE_MPI
-  MPI_Reduce(&elapsed_time, &elapsed_timeG, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
-#else
   elapsed_timeG = elapsed_time;
-#endif
 
   cudaProfilerStop();
 
@@ -4396,10 +4080,6 @@ int main(int argc, char* argv[]) {
   DumpDomain(locDom);
 #endif
   cudaDeviceReset();
-
-#if USE_MPI
-  MPI_Finalize();
-#endif
 
   return 0;
 }
