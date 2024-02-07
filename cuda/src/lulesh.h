@@ -2,22 +2,6 @@
 
 #define LULESH_SHOW_PROGRESS 0
 #define DOUBLE_PRECISION
-// #define SAMI
-
-#if USE_MPI
-  #include <mpi.h>
-
-  /*
-     define one of these three symbols:
-
-     SEDOV_SYNC_POS_VEL_NONE
-     SEDOV_SYNC_POS_VEL_EARLY
-     SEDOV_SYNC_POS_VEL_LATE
-  */
-
-  // TODO: currently we support only early sync!
-  #define SEDOV_SYNC_POS_VEL_EARLY 1
-#endif
 
 enum {
   VolumeError = -1,
@@ -254,19 +238,6 @@ class Domain {
   Index_t m_rowMin, m_rowMax;
   Index_t m_colMin, m_colMax;
   Index_t m_planeMin, m_planeMax;
-
-#if USE_MPI
-  // Communication Work space
-  Real_t* commDataSend;
-  Real_t* commDataRecv;
-
-  Real_t* d_commDataSend;
-  Real_t* d_commDataRecv;
-
-  // Maximum number of block neighbors
-  MPI_Request recvRequest[26];  // 6 faces + 12 edges + 8 corners
-  MPI_Request sendRequest[26];  // 6 faces + 12 edges + 8 corners
-#endif
 };
 
 typedef Real_t& (Domain::*Domain_member)(Index_t);
