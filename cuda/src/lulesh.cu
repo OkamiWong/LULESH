@@ -79,6 +79,16 @@ Additional BSD Notice
 #include "cuda_profiler_api.h"
 #include "lulesh.h"
 
+template <typename T>
+void __check(T result, char const* const func, const char* const file, int const line) {
+  if (result) {
+    fprintf(stderr, "CUDA error at %s:%d code=%d \"%s\" \n", file, line, static_cast<unsigned int>(result), func);
+    exit(EXIT_FAILURE);
+  }
+}
+
+#define checkCudaErrors(val) __check((val), #val, __FILE__, __LINE__)
+
 /****************************************************/
 /* Allow flexibility for arithmetic representations */
 /****************************************************/
@@ -248,68 +258,68 @@ void cuda_init(int rank) {
 }
 
 void AllocateNodalPersistent(Domain* domain, size_t domNodes) {
-  domain->x.resize(domNodes); /* coordinates */
-  domain->y.resize(domNodes);
-  domain->z.resize(domNodes);
+  checkCudaErrors(cudaMalloc(&domain->x, domNodes * sizeof(Real_t)));
+  checkCudaErrors(cudaMalloc(&domain->y, domNodes * sizeof(Real_t)));
+  checkCudaErrors(cudaMalloc(&domain->z, domNodes * sizeof(Real_t)));
 
-  domain->xd.resize(domNodes); /* velocities */
-  domain->yd.resize(domNodes);
-  domain->zd.resize(domNodes);
+  checkCudaErrors(cudaMalloc(&domain->xd, domNodes * sizeof(Real_t)));
+  checkCudaErrors(cudaMalloc(&domain->yd, domNodes * sizeof(Real_t)));
+  checkCudaErrors(cudaMalloc(&domain->zd, domNodes * sizeof(Real_t)));
 
-  domain->xdd.resize(domNodes); /* accelerations */
-  domain->ydd.resize(domNodes);
-  domain->zdd.resize(domNodes);
+  checkCudaErrors(cudaMalloc(&domain->xdd, domNodes * sizeof(Real_t)));
+  checkCudaErrors(cudaMalloc(&domain->ydd, domNodes * sizeof(Real_t)));
+  checkCudaErrors(cudaMalloc(&domain->zdd, domNodes * sizeof(Real_t)));
 
-  domain->fx.resize(domNodes); /* forces */
-  domain->fy.resize(domNodes);
-  domain->fz.resize(domNodes);
+  checkCudaErrors(cudaMalloc(&domain->fx, domNodes * sizeof(Real_t)));
+  checkCudaErrors(cudaMalloc(&domain->fy, domNodes * sizeof(Real_t)));
+  checkCudaErrors(cudaMalloc(&domain->fz, domNodes * sizeof(Real_t)));
 
-  domain->nodalMass.resize(domNodes); /* mass */
+  checkCudaErrors(cudaMalloc(&domain->nodalMass, domNodes * sizeof(Real_t)));
 }
 
 void AllocateElemPersistent(Domain* domain, size_t domElems, size_t padded_domElems) {
-  domain->matElemlist.resize(domElems);         /* material indexset */
-  domain->nodelist.resize(8 * padded_domElems); /* elemToNode connectivity */
+  checkCudaErrors(cudaMalloc(&domain->matElemlist, domElems * sizeof(Index_t)));
+  checkCudaErrors(cudaMalloc(&domain->nodelist, 8 * padded_domElems * sizeof(Index_t)));
 
-  domain->lxim.resize(domElems); /* elem connectivity through face */
-  domain->lxip.resize(domElems);
-  domain->letam.resize(domElems);
-  domain->letap.resize(domElems);
-  domain->lzetam.resize(domElems);
-  domain->lzetap.resize(domElems);
+  checkCudaErrors(cudaMalloc(&domain->lxim, domElems * sizeof(Index_t)));
+  checkCudaErrors(cudaMalloc(&domain->lxip, domElems * sizeof(Index_t)));
+  checkCudaErrors(cudaMalloc(&domain->letam, domElems * sizeof(Index_t)));
+  checkCudaErrors(cudaMalloc(&domain->letap, domElems * sizeof(Index_t)));
+  checkCudaErrors(cudaMalloc(&domain->lzetam, domElems * sizeof(Index_t)));
+  checkCudaErrors(cudaMalloc(&domain->lzetap, domElems * sizeof(Index_t)));
 
-  domain->elemBC.resize(domElems); /* elem face symm/free-surf flag */
+  checkCudaErrors(cudaMalloc(&domain->elemBC, domElems * sizeof(Int_t)));
 
-  domain->e.resize(domElems); /* energy */
-  domain->p.resize(domElems); /* pressure */
+  checkCudaErrors(cudaMalloc(&domain->e, domElems * sizeof(Real_t)));
+  checkCudaErrors(cudaMalloc(&domain->p, domElems * sizeof(Real_t)));
 
-  domain->q.resize(domElems);  /* q */
-  domain->ql.resize(domElems); /* linear term for q */
-  domain->qq.resize(domElems); /* quadratic term for q */
+  checkCudaErrors(cudaMalloc(&domain->q, domElems * sizeof(Real_t)));
+  checkCudaErrors(cudaMalloc(&domain->ql, domElems * sizeof(Real_t)));
+  checkCudaErrors(cudaMalloc(&domain->qq, domElems * sizeof(Real_t)));
 
-  domain->v.resize(domElems); /* relative volume */
+  checkCudaErrors(cudaMalloc(&domain->v, domElems * sizeof(Real_t)));
 
-  domain->volo.resize(domElems); /* reference volume */
-  domain->delv.resize(domElems); /* m_vnew - m_v */
-  domain->vdov.resize(domElems); /* volume derivative over volume */
+  checkCudaErrors(cudaMalloc(&domain->volo, domElems * sizeof(Real_t)));
+  checkCudaErrors(cudaMalloc(&domain->delv, domElems * sizeof(Real_t)));
+  checkCudaErrors(cudaMalloc(&domain->vdov, domElems * sizeof(Real_t)));
 
-  domain->arealg.resize(domElems); /* elem characteristic length */
+  checkCudaErrors(cudaMalloc(&domain->arealg, domElems * sizeof(Real_t)));
 
-  domain->ss.resize(domElems); /* "sound speed" */
+  checkCudaErrors(cudaMalloc(&domain->ss, domElems * sizeof(Real_t)));
 
-  domain->elemMass.resize(domElems); /* mass */
+  checkCudaErrors(cudaMalloc(&domain->elemMass, domElems * sizeof(Real_t)));
 }
 
 void AllocateSymmX(Domain* domain, size_t size) {
-  domain->symmX.resize(size);
+  checkCudaErrors(cudaMalloc(&domain->symmX, size * sizeof(Index_t)));
 }
 
 void AllocateSymmY(Domain* domain, size_t size) {
-  domain->symmY.resize(size);
+  checkCudaErrors(cudaMalloc(&domain->symmY, size * sizeof(Index_t)));
 }
 
 void AllocateSymmZ(Domain* domain, size_t size) {
-  domain->symmZ.resize(size);
+  checkCudaErrors(cudaMalloc(&domain->symmZ, size * sizeof(Index_t)));
 }
 
 void InitializeFields(Domain* domain) {
@@ -791,11 +801,11 @@ Domain* NewDomain(char* argv[], Int_t numRanks, Index_t colLoc, Index_t rowLoc, 
   domain->deltatime_h = (.5 * cbrt(domain->volo[0])) / sqrt(2 * einit);
 
   domain->cost = cost;
-  domain->regNumList.resize(domain->numElem);   // material indexset
-  domain->regElemlist.resize(domain->numElem);  // material indexset
-  domain->regCSR.resize(nr);
-  domain->regReps.resize(nr);
-  domain->regSorted.resize(nr);
+  checkCudaErrors(cudaMalloc(&domain->regNumList, domain->numElem * sizeof(Index_t)));
+  checkCudaErrors(cudaMalloc(&domain->regElemlist, domain->numElem * sizeof(Index_t)));
+  checkCudaErrors(cudaMalloc(&domain->regCSR, nr * sizeof(Int_t)));
+  checkCudaErrors(cudaMalloc(&domain->regReps, nr * sizeof(Int_t)));
+  checkCudaErrors(cudaMalloc(&domain->regSorted, nr * sizeof(Int_t)));
 
   // Setup region index sets. For now, these are constant sized
   // throughout the run, but could be changed every cycle to
@@ -851,11 +861,11 @@ void Domain::CreateRegionIndexSets(Int_t nr, Int_t b) {
   regElemSize = new Int_t[numReg];
   Index_t nextIndex = 0;
 
-  Vector_h<Int_t> regCSR_h(regCSR.size());              // records the begining and end of each region
-  Vector_h<Int_t> regReps_h(regReps.size());            // records the rep number per region
-  Vector_h<Index_t> regNumList_h(regNumList.size());    // Region number per domain element
-  Vector_h<Index_t> regElemlist_h(regElemlist.size());  // region indexset
-  Vector_h<Index_t> regSorted_h(regSorted.size());      // keeps index of sorted regions
+  Vector_h<Int_t> regCSR_h(nr);                      // records the begining and end of each region
+  Vector_h<Int_t> regReps_h(nr);                     // records the rep number per region
+  Vector_h<Index_t> regNumList_h(domain->numElem);   // Region number per domain element
+  Vector_h<Index_t> regElemlist_h(domain->numElem);  // region indexset
+  Vector_h<Index_t> regSorted_h(nr);                 // keeps index of sorted regions
 
   // if we only have one region just fill it
   //  Fill out the regNumList with material numbers, which are always
@@ -960,12 +970,11 @@ void Domain::CreateRegionIndexSets(Int_t nr, Int_t b) {
   }
 
   // Copy to device
-  regCSR = regCSR_h;            // records the begining and end of each region
-  regReps = regReps_h;          // records the rep number per region
-  regNumList = regNumList_h;    // Region number per domain element
-  regElemlist = regElemlist_h;  // region indexset
-  regSorted = regSorted_h;      // keeps index of sorted regions
-
+  checkCudaErrors(cudaMemcpy(regCSR, regCSR_h.raw(), nr * sizeof(Int_t), cudaMemcpyDefault));                           // records the begining and end of each region
+  checkCudaErrors(cudaMemcpy(regReps, regReps_h.raw(), nr * sizeof(Int_t), cudaMemcpyDefault));                         // records the rep number per region
+  checkCudaErrors(cudaMemcpy(regNumList, regNumList_h.raw(), domain->numElem * sizeof(Index_t), cudaMemcpyDefault));    // Region number per domain element
+  checkCudaErrors(cudaMemcpy(regElemlist, regElemlist_h.raw(), domain->numElem * sizeof(Index_t), cudaMemcpyDefault));  // region indexset
+  checkCudaErrors(cudaMemcpy(regSorted, regSorted_h.raw(), nr * sizeof(Index_t), cudaMemcpyDefault));                   // keeps index of sorted regions
 }  // end of create function
 
 static inline void TimeIncrement(Domain* domain) {

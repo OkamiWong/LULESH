@@ -31,37 +31,37 @@ class Domain {
 
   /* Elem-centered */
 
-  Vector_d<Index_t> matElemlist; /* material indexset */
-  Vector_d<Index_t> nodelist;    /* elemToNode connectivity */
+  Index_t* matElemlist; /* material indexset */
+  Index_t* nodelist;    /* elemToNode connectivity */
 
-  Vector_d<Index_t> lxim; /* element connectivity through face */
-  Vector_d<Index_t> lxip;
-  Vector_d<Index_t> letam;
-  Vector_d<Index_t> letap;
-  Vector_d<Index_t> lzetam;
-  Vector_d<Index_t> lzetap;
+  Index_t* lxim; /* element connectivity through face */
+  Index_t* lxip;
+  Index_t* letam;
+  Index_t* letap;
+  Index_t* lzetam;
+  Index_t* lzetap;
 
-  Vector_d<Int_t> elemBC; /* elem face symm/free-surf flag */
+  Int_t* elemBC; /* elem face symm/free-surf flag */
 
-  Vector_d<Real_t> e; /* energy */
+  Real_t* e; /* energy */
 
-  Vector_d<Real_t> p; /* pressure */
+  Real_t* p; /* pressure */
 
-  Vector_d<Real_t> q;  /* q */
-  Vector_d<Real_t> ql; /* linear term for q */
-  Vector_d<Real_t> qq; /* quadratic term for q */
+  Real_t* q;  /* q */
+  Real_t* ql; /* linear term for q */
+  Real_t* qq; /* quadratic term for q */
 
-  Vector_d<Real_t> v; /* relative volume */
+  Real_t* v; /* relative volume */
 
-  Vector_d<Real_t> volo; /* reference volume */
-  Vector_d<Real_t> delv; /* m_vnew - m_v */
-  Vector_d<Real_t> vdov; /* volume derivative over volume */
+  Real_t* volo; /* reference volume */
+  Real_t* delv; /* m_vnew - m_v */
+  Real_t* vdov; /* volume derivative over volume */
 
-  Vector_d<Real_t> arealg; /* char length of an element */
+  Real_t* arealg; /* char length of an element */
 
-  Vector_d<Real_t> ss; /* "sound speed" */
+  Real_t* ss; /* "sound speed" */
 
-  Vector_d<Real_t> elemMass; /* mass */
+  Real_t* elemMass; /* mass */
 
   Vector_d<Real_t>* vnew; /* new relative volume -- temporary */
 
@@ -79,33 +79,33 @@ class Domain {
 
   /* Node-centered */
 
-  Vector_d<Real_t> x; /* coordinates */
-  Vector_d<Real_t> y;
-  Vector_d<Real_t> z;
+  Real_t* x; /* coordinates */
+  Real_t* y;
+  Real_t* z;
 
-  Vector_d<Real_t> xd; /* velocities */
-  Vector_d<Real_t> yd;
-  Vector_d<Real_t> zd;
+  Real_t* xd; /* velocities */
+  Real_t* yd;
+  Real_t* zd;
 
-  Vector_d<Real_t> xdd; /* accelerations */
-  Vector_d<Real_t> ydd;
-  Vector_d<Real_t> zdd;
+  Real_t* xdd; /* accelerations */
+  Real_t* ydd;
+  Real_t* zdd;
 
-  Vector_d<Real_t> fx; /* forces */
-  Vector_d<Real_t> fy;
-  Vector_d<Real_t> fz;
+  Real_t* fx; /* forces */
+  Real_t* fy;
+  Real_t* fz;
 
-  Vector_d<Real_t> nodalMass;   /* mass */
+  Real_t* nodalMass; /* mass */
 
   /* Boundary nodesets */
 
-  Vector_d<Index_t> symmX; /* symmetry plane nodesets */
-  Vector_d<Index_t> symmY;
-  Vector_d<Index_t> symmZ;
+  Index_t* symmX; /* symmetry plane nodesets */
+  Index_t* symmY;
+  Index_t* symmZ;
 
-  Vector_d<Int_t> nodeElemCount;
-  Vector_d<Int_t> nodeElemStart;
-  Vector_d<Index_t> nodeElemCornerList;
+  Int_t* nodeElemCount;
+  Int_t* nodeElemStart;
+  Index_t* nodeElemCornerList;
 
   /* Parameters */
 
@@ -176,15 +176,15 @@ class Domain {
   Index_t octantCorner;
 
   // Region information
-  Int_t numReg;                   // number of regions (def:11)
-  Int_t balance;                  // Load balance between regions of a domain (def: 1)
-  Int_t cost;                     // imbalance cost (def: 1)
-  Int_t* regElemSize;             // Size of region sets
-  Vector_d<Int_t> regCSR;         // records the begining and end of each region
-  Vector_d<Int_t> regReps;        // records the rep number per region
-  Vector_d<Index_t> regNumList;   // Region number per domain element
-  Vector_d<Index_t> regElemlist;  // region indexset
-  Vector_d<Index_t> regSorted;    // keeps index of sorted regions
+  Int_t numReg;          // number of regions (def:11)
+  Int_t balance;         // Load balance between regions of a domain (def: 1)
+  Int_t cost;            // imbalance cost (def: 1)
+  Int_t* regElemSize;    // Size of region sets
+  Int_t* regCSR;         // records the begining and end of each region
+  Int_t* regReps;        // records the rep number per region
+  Index_t* regNumList;   // Region number per domain element
+  Index_t* regElemlist;  // region indexset
+  Index_t* regSorted;    // keeps index of sorted regions
 
   //
   // MPI-Related additional data
