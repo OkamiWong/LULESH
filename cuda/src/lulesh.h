@@ -96,44 +96,6 @@ class Domain {
   Vector_d<Real_t> fz;
 
   Vector_d<Real_t> nodalMass;   /* mass */
-  Vector_h<Real_t> h_nodalMass; /* mass - host */
-
-  /* device pointers for comms */
-  Real_t* d_delv_xi; /* velocity gradient -- temporary */
-  Real_t* d_delv_eta;
-  Real_t* d_delv_zeta;
-
-  Real_t* d_x; /* coordinates */
-  Real_t* d_y;
-  Real_t* d_z;
-
-  Real_t* d_xd; /* velocities */
-  Real_t* d_yd;
-  Real_t* d_zd;
-
-  Real_t* d_fx; /* forces */
-  Real_t* d_fy;
-  Real_t* d_fz;
-
-  /* access elements for comms */
-  Real_t& get_delv_xi(Index_t idx) { return d_delv_xi[idx]; }
-  Real_t& get_delv_eta(Index_t idx) { return d_delv_eta[idx]; }
-  Real_t& get_delv_zeta(Index_t idx) { return d_delv_zeta[idx]; }
-
-  Real_t& get_x(Index_t idx) { return d_x[idx]; }
-  Real_t& get_y(Index_t idx) { return d_y[idx]; }
-  Real_t& get_z(Index_t idx) { return d_z[idx]; }
-
-  Real_t& get_xd(Index_t idx) { return d_xd[idx]; }
-  Real_t& get_yd(Index_t idx) { return d_yd[idx]; }
-  Real_t& get_zd(Index_t idx) { return d_zd[idx]; }
-
-  Real_t& get_fx(Index_t idx) { return d_fx[idx]; }
-  Real_t& get_fy(Index_t idx) { return d_fy[idx]; }
-  Real_t& get_fz(Index_t idx) { return d_fz[idx]; }
-
-  // host access
-  Real_t& get_nodalMass(Index_t idx) { return h_nodalMass[idx]; }
 
   /* Boundary nodesets */
 
@@ -255,16 +217,3 @@ typedef Real_t& (Domain::*Domain_member)(Index_t);
 #define MSG_MONOQ 3072
 
 #define MAX_FIELDS_PER_MPI_COMM 6
-
-// cpu-comms
-void CommRecv(Domain& domain, Int_t msgType, Index_t xferFields, Index_t dx, Index_t dy, Index_t dz, bool doRecv, bool planeOnly);
-void CommSend(Domain& domain, Int_t msgType, Index_t xferFields, Domain_member* fieldData, Index_t dx, Index_t dy, Index_t dz, bool doSend, bool planeOnly);
-void CommSBN(Domain& domain, Int_t xferFields, Domain_member* fieldData);
-void CommSyncPosVel(Domain& domain);
-void CommMonoQ(Domain& domain);
-
-// gpu-comms
-void CommSendGpu(Domain& domain, Int_t msgType, Index_t xferFields, Domain_member* fieldData, Index_t dx, Index_t dy, Index_t dz, bool doSend, bool planeOnly, cudaStream_t stream);
-void CommSBNGpu(Domain& domain, Int_t xferFields, Domain_member* fieldData, cudaStream_t* streams);
-void CommSyncPosVelGpu(Domain& domain, cudaStream_t* streams);
-void CommMonoQGpu(Domain& domain, cudaStream_t stream);
