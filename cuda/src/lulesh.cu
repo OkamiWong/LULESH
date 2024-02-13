@@ -544,7 +544,7 @@ void Domain::BuildMesh(Int_t nx, Int_t edgeNodes, Int_t edgeElems, Int_t domNode
   nodelist = nodelist_h;
 }
 
-Domain* NewDomain(char* argv[], Int_t numRanks, Index_t colLoc, Index_t rowLoc, Index_t planeLoc, Index_t nx, int tp, bool structured, Int_t nr, Int_t balance, Int_t cost) {
+Domain* NewDomain(char* argv[], Int_t numRanks, Index_t colLoc, Index_t rowLoc, Index_t planeLoc, Index_t nx, int tp, Int_t nr, Int_t balance, Int_t cost) {
   Domain* domain = new Domain;
 
   domain->max_streams = 32;
@@ -564,280 +564,84 @@ Domain* NewDomain(char* argv[], Int_t numRanks, Index_t colLoc, Index_t rowLoc, 
   Vector_h<Real_t> y_h;
   Vector_h<Real_t> z_h;
 
-  if (structured) {
-    domain->m_tp = tp;
-    domain->m_numRanks = numRanks;
+  domain->m_tp = tp;
+  domain->m_numRanks = numRanks;
 
-    domain->m_colLoc = colLoc;
-    domain->m_rowLoc = rowLoc;
-    domain->m_planeLoc = planeLoc;
+  domain->m_colLoc = colLoc;
+  domain->m_rowLoc = rowLoc;
+  domain->m_planeLoc = planeLoc;
 
-    Index_t edgeElems = nx;
-    Index_t edgeNodes = edgeElems + 1;
+  Index_t edgeElems = nx;
+  Index_t edgeNodes = edgeElems + 1;
 
-    domain->sizeX = edgeElems;
-    domain->sizeY = edgeElems;
-    domain->sizeZ = edgeElems;
+  domain->sizeX = edgeElems;
+  domain->sizeY = edgeElems;
+  domain->sizeZ = edgeElems;
 
-    domain->numElem = domain->sizeX * domain->sizeY * domain->sizeZ;
-    domain->padded_numElem = PAD(domain->numElem, 32);
+  domain->numElem = domain->sizeX * domain->sizeY * domain->sizeZ;
+  domain->padded_numElem = PAD(domain->numElem, 32);
 
-    domain->numNode = (domain->sizeX + 1) * (domain->sizeY + 1) * (domain->sizeZ + 1);
-    domain->padded_numNode = PAD(domain->numNode, 32);
+  domain->numNode = (domain->sizeX + 1) * (domain->sizeY + 1) * (domain->sizeZ + 1);
+  domain->padded_numNode = PAD(domain->numNode, 32);
 
-    domElems = domain->numElem;
-    domNodes = domain->numNode;
-    padded_domElems = domain->padded_numElem;
+  domElems = domain->numElem;
+  domNodes = domain->numNode;
+  padded_domElems = domain->padded_numElem;
 
-    AllocateElemPersistent(domain, domElems, padded_domElems);
-    AllocateNodalPersistent(domain, domNodes);
+  AllocateElemPersistent(domain, domElems, padded_domElems);
+  AllocateNodalPersistent(domain, domNodes);
 
-    domain->SetupCommBuffers(edgeNodes);
+  domain->SetupCommBuffers(edgeNodes);
 
-    InitializeFields(domain);
+  InitializeFields(domain);
 
-    domain->BuildMesh(nx, edgeNodes, edgeElems, domNodes, padded_domElems, x_h, y_h, z_h, nodelist_h);
+  domain->BuildMesh(nx, edgeNodes, edgeElems, domNodes, padded_domElems, x_h, y_h, z_h, nodelist_h);
 
-    domain->numSymmX = domain->numSymmY = domain->numSymmZ = 0;
+  domain->numSymmX = domain->numSymmY = domain->numSymmZ = 0;
 
-    if (domain->m_colLoc == 0)
-      domain->numSymmX = (edgeElems + 1) * (edgeElems + 1);
-    if (domain->m_rowLoc == 0)
-      domain->numSymmY = (edgeElems + 1) * (edgeElems + 1);
-    if (domain->m_planeLoc == 0)
-      domain->numSymmZ = (edgeElems + 1) * (edgeElems + 1);
+  if (domain->m_colLoc == 0)
+    domain->numSymmX = (edgeElems + 1) * (edgeElems + 1);
+  if (domain->m_rowLoc == 0)
+    domain->numSymmY = (edgeElems + 1) * (edgeElems + 1);
+  if (domain->m_planeLoc == 0)
+    domain->numSymmZ = (edgeElems + 1) * (edgeElems + 1);
 
-    AllocateSymmX(domain, edgeNodes * edgeNodes);
-    AllocateSymmY(domain, edgeNodes * edgeNodes);
-    AllocateSymmZ(domain, edgeNodes * edgeNodes);
+  AllocateSymmX(domain, edgeNodes * edgeNodes);
+  AllocateSymmY(domain, edgeNodes * edgeNodes);
+  AllocateSymmZ(domain, edgeNodes * edgeNodes);
 
-    /* set up symmetry nodesets */
+  /* set up symmetry nodesets */
 
-    Vector_h<Index_t> symmX_h(domain->symmX.size());
-    Vector_h<Index_t> symmY_h(domain->symmY.size());
-    Vector_h<Index_t> symmZ_h(domain->symmZ.size());
+  Vector_h<Index_t> symmX_h(domain->symmX.size());
+  Vector_h<Index_t> symmY_h(domain->symmY.size());
+  Vector_h<Index_t> symmZ_h(domain->symmZ.size());
 
-    Int_t nidx = 0;
-    for (Index_t i = 0; i < edgeNodes; ++i) {
-      Index_t planeInc = i * edgeNodes * edgeNodes;
-      Index_t rowInc = i * edgeNodes;
-      for (Index_t j = 0; j < edgeNodes; ++j) {
-        if (domain->m_planeLoc == 0) {
-          symmZ_h[nidx] = rowInc + j;
-        }
-        if (domain->m_rowLoc == 0) {
-          symmY_h[nidx] = planeInc + j;
-        }
-        if (domain->m_colLoc == 0) {
-          symmX_h[nidx] = planeInc + j * edgeNodes;
-        }
-        ++nidx;
+  Int_t nidx = 0;
+  for (Index_t i = 0; i < edgeNodes; ++i) {
+    Index_t planeInc = i * edgeNodes * edgeNodes;
+    Index_t rowInc = i * edgeNodes;
+    for (Index_t j = 0; j < edgeNodes; ++j) {
+      if (domain->m_planeLoc == 0) {
+        symmZ_h[nidx] = rowInc + j;
       }
-    }
-
-    if (domain->m_planeLoc == 0)
-      domain->symmZ = symmZ_h;
-    if (domain->m_rowLoc == 0)
-      domain->symmY = symmY_h;
-    if (domain->m_colLoc == 0)
-      domain->symmX = symmX_h;
-
-    SetupConnectivityBC(domain, edgeElems);
-  } else {
-    FILE* fp;
-    int ee, en;
-
-    if ((fp = fopen(argv[2], "r")) == 0) {
-      printf("could not open file %s\n", argv[2]);
-      exit(LFileError);
-    }
-
-    bool fsuccess;
-    fsuccess = fscanf(fp, "%d %d", &ee, &en);
-    domain->numElem = Index_t(ee);
-    domain->padded_numElem = PAD(domain->numElem, 32);
-
-    domain->numNode = Index_t(en);
-    domain->padded_numNode = PAD(domain->numNode, 32);
-
-    domElems = domain->numElem;
-    domNodes = domain->numNode;
-    padded_domElems = domain->padded_numElem;
-
-    AllocateElemPersistent(domain, domElems, padded_domElems);
-    AllocateNodalPersistent(domain, domNodes);
-
-    InitializeFields(domain);
-
-    /* initialize nodal coordinates */
-    x_h.resize(domNodes);
-    y_h.resize(domNodes);
-    z_h.resize(domNodes);
-
-    for (Index_t i = 0; i < domNodes; ++i) {
-      double px, py, pz;
-      fsuccess = fscanf(fp, "%lf %lf %lf", &px, &py, &pz);
-      x_h[i] = Real_t(px);
-      y_h[i] = Real_t(py);
-      z_h[i] = Real_t(pz);
-    }
-    domain->x = x_h;
-    domain->y = y_h;
-    domain->z = z_h;
-
-    /* embed hexehedral elements in nodal point lattice */
-    nodelist_h.resize(padded_domElems * 8);
-    for (Index_t zidx = 0; zidx < domElems; ++zidx) {
-      for (Index_t ni = 0; ni < Index_t(8); ++ni) {
-        int n;
-        fsuccess = fscanf(fp, "%d", &n);
-        nodelist_h[ni * padded_domElems + zidx] = Index_t(n);
+      if (domain->m_rowLoc == 0) {
+        symmY_h[nidx] = planeInc + j;
       }
+      if (domain->m_colLoc == 0) {
+        symmX_h[nidx] = planeInc + j * edgeNodes;
+      }
+      ++nidx;
     }
-    domain->nodelist = nodelist_h;
+  }
 
-    /* set up face-based element neighbors */
-    Vector_h<Index_t> lxim_h(domElems);
-    Vector_h<Index_t> lxip_h(domElems);
-    Vector_h<Index_t> letam_h(domElems);
-    Vector_h<Index_t> letap_h(domElems);
-    Vector_h<Index_t> lzetam_h(domElems);
-    Vector_h<Index_t> lzetap_h(domElems);
-
-    for (Index_t i = 0; i < domElems; ++i) {
-      int xi_m, xi_p, eta_m, eta_p, zeta_m, zeta_p;
-      fsuccess = fscanf(fp, "%d %d %d %d %d %d", &xi_m, &xi_p, &eta_m, &eta_p, &zeta_m, &zeta_p);
-
-      lxim_h[i] = Index_t(xi_m);
-      lxip_h[i] = Index_t(xi_p);
-      letam_h[i] = Index_t(eta_m);
-      letap_h[i] = Index_t(eta_p);
-      lzetam_h[i] = Index_t(zeta_m);
-      lzetap_h[i] = Index_t(zeta_p);
-    }
-
-    domain->lxim = lxim_h;
-    domain->lxip = lxip_h;
-    domain->letam = letam_h;
-    domain->letap = letap_h;
-    domain->lzetam = lzetam_h;
-    domain->lzetap = lzetap_h;
-
-    /* set up X symmetry nodeset */
-
-    fsuccess = fscanf(fp, "%d", &domain->numSymmX);
-    Vector_h<Index_t> symmX_h(domain->numSymmX);
-    for (Index_t i = 0; i < domain->numSymmX; ++i) {
-      int n;
-      fsuccess = fscanf(fp, "%d", &n);
-      symmX_h[i] = Index_t(n);
-    }
+  if (domain->m_planeLoc == 0)
+    domain->symmZ = symmZ_h;
+  if (domain->m_rowLoc == 0)
+    domain->symmY = symmY_h;
+  if (domain->m_colLoc == 0)
     domain->symmX = symmX_h;
 
-    fsuccess = fscanf(fp, "%d", &domain->numSymmY);
-    Vector_h<Index_t> symmY_h(domain->numSymmY);
-    for (Index_t i = 0; i < domain->numSymmY; ++i) {
-      int n;
-      fsuccess = fscanf(fp, "%d", &n);
-      symmY_h[i] = Index_t(n);
-    }
-    domain->symmY = symmY_h;
-
-    fsuccess = fscanf(fp, "%d", &domain->numSymmZ);
-    Vector_h<Index_t> symmZ_h(domain->numSymmZ);
-    for (Index_t i = 0; i < domain->numSymmZ; ++i) {
-      int n;
-      fsuccess = fscanf(fp, "%d", &n);
-      symmZ_h[i] = Index_t(n);
-    }
-    domain->symmZ = symmZ_h;
-
-    /* set up free surface nodeset */
-    Index_t numFreeSurf;
-    fsuccess = fscanf(fp, "%d", &numFreeSurf);
-    Vector_h<Index_t> freeSurf_h(numFreeSurf);
-    for (Index_t i = 0; i < numFreeSurf; ++i) {
-      int n;
-      fsuccess = fscanf(fp, "%d", &n);
-      freeSurf_h[i] = Index_t(n);
-    }
-    printf("%c\n", fsuccess);  // nothing
-    fclose(fp);
-
-    /* set up boundary condition information */
-    Vector_h<Index_t> elemBC_h(domElems);
-    Vector_h<Index_t> surfaceNode_h(domNodes);
-
-    for (Index_t i = 0; i < domain->numElem; ++i) {
-      elemBC_h[i] = 0;
-    }
-
-    for (Index_t i = 0; i < domain->numNode; ++i) {
-      surfaceNode_h[i] = 0;
-    }
-
-    for (Index_t i = 0; i < domain->numSymmX; ++i) {
-      surfaceNode_h[symmX_h[i]] = 1;
-    }
-
-    for (Index_t i = 0; i < domain->numSymmY; ++i) {
-      surfaceNode_h[symmY_h[i]] = 1;
-    }
-
-    for (Index_t i = 0; i < domain->numSymmZ; ++i) {
-      surfaceNode_h[symmZ_h[i]] = 1;
-    }
-
-    for (Index_t zidx = 0; zidx < domain->numElem; ++zidx) {
-      Int_t mask = 0;
-
-      for (Index_t ni = 0; ni < 8; ++ni) {
-        mask |= (surfaceNode_h[nodelist_h[ni * domain->padded_numElem + zidx]] << ni);
-      }
-
-      if ((mask & 0x0f) == 0x0f) elemBC_h[zidx] |= ZETA_M_SYMM;
-      if ((mask & 0xf0) == 0xf0) elemBC_h[zidx] |= ZETA_P_SYMM;
-      if ((mask & 0x33) == 0x33) elemBC_h[zidx] |= ETA_M_SYMM;
-      if ((mask & 0xcc) == 0xcc) elemBC_h[zidx] |= ETA_P_SYMM;
-      if ((mask & 0x99) == 0x99) elemBC_h[zidx] |= XI_M_SYMM;
-      if ((mask & 0x66) == 0x66) elemBC_h[zidx] |= XI_P_SYMM;
-    }
-
-    for (Index_t zidx = 0; zidx < domain->numElem; ++zidx) {
-      if (elemBC_h[zidx] == (XI_M_SYMM | ETA_M_SYMM | ZETA_M_SYMM)) {
-        domain->octantCorner = zidx;
-        break;
-      }
-    }
-
-    for (Index_t i = 0; i < domain->numNode; ++i) {
-      surfaceNode_h[i] = 0;
-    }
-
-    for (Index_t i = 0; i < numFreeSurf; ++i) {
-      surfaceNode_h[freeSurf_h[i]] = 1;
-    }
-
-    for (Index_t zidx = 0; zidx < domain->numElem; ++zidx) {
-      Int_t mask = 0;
-
-      for (Index_t ni = 0; ni < 8; ++ni) {
-        mask |= (surfaceNode_h[nodelist_h[ni * domain->padded_numElem + zidx]] << ni);
-      }
-
-      if ((mask & 0x0f) == 0x0f) elemBC_h[zidx] |= ZETA_M_SYMM;
-      if ((mask & 0xf0) == 0xf0) elemBC_h[zidx] |= ZETA_P_SYMM;
-      if ((mask & 0x33) == 0x33) elemBC_h[zidx] |= ETA_M_SYMM;
-      if ((mask & 0xcc) == 0xcc) elemBC_h[zidx] |= ETA_P_SYMM;
-      if ((mask & 0x99) == 0x99) elemBC_h[zidx] |= XI_M_SYMM;
-      if ((mask & 0x66) == 0x66) elemBC_h[zidx] |= XI_P_SYMM;
-    }
-
-    domain->elemBC = elemBC_h;
-
-    /* deposit energy */
-    domain->e[domain->octantCorner] = Real_t(3.948746e+7);
-  }
+  SetupConnectivityBC(domain, edgeElems);
 
   /* set up node-centered indexing of elements */
   Vector_h<Index_t> nodeElemCount_h(domNodes);
@@ -3104,7 +2908,6 @@ static inline void LagrangeLeapFrog(Domain* domain) {
 
 void printUsage(char* argv[]) {
   printf("Usage: \n");
-  printf("Unstructured grid:  %s -u <file.lmesh> \n", argv[0]);
   printf("Structured grid:    %s -s numEdgeElems \n", argv[0]);
   printf("\nExamples:\n");
   printf("%s -s 45\n", argv[0]);
@@ -3176,7 +2979,7 @@ void InitMeshDecomp(Int_t numRanks, Int_t myRank, Int_t* col, Int_t* row, Int_t*
   return;
 }
 
-void VerifyAndWriteFinalOutput(Real_t elapsed_time, Domain& locDom, Int_t its, Int_t nx, Int_t numRanks, bool structured) {
+void VerifyAndWriteFinalOutput(Real_t elapsed_time, Domain& locDom, Int_t its, Int_t nx, Int_t numRanks) {
   size_t free_mem, total_mem, used_mem;
   cudaMemGetInfo(&free_mem, &total_mem);
   used_mem = total_mem - free_mem;
@@ -3189,51 +2992,45 @@ void VerifyAndWriteFinalOutput(Real_t elapsed_time, Domain& locDom, Int_t its, I
   // GrindTime2 takes into account speedups from MPI parallelism
   Real_t grindTime1;
   Real_t grindTime2;
-  if (structured) {
-    grindTime1 = ((elapsed_time * 1e6) / its) / (nx * nx * nx);
-    grindTime2 = ((elapsed_time * 1e6) / its) / (nx * nx * nx * numRanks);
-  } else {
-    grindTime1 = ((elapsed_time * 1e6) / its) / (locDom.numElem);
-    grindTime2 = ((elapsed_time * 1e6) / its) / (locDom.numElem * numRanks);
-  }
+  grindTime1 = ((elapsed_time * 1e6) / its) / (nx * nx * nx);
+  grindTime2 = ((elapsed_time * 1e6) / its) / (nx * nx * nx * numRanks);
+
   // Copy Energy back to Host
-  if (structured) {
-    Real_t e_zero;
-    Real_t* d_ezero_ptr = locDom.e.raw() + locDom.octantCorner; /* octant corner supposed to be 0 */
-    cudaMemcpy(&e_zero, d_ezero_ptr, sizeof(Real_t), cudaMemcpyDeviceToHost);
+  Real_t e_zero;
+  Real_t* d_ezero_ptr = locDom.e.raw() + locDom.octantCorner; /* octant corner supposed to be 0 */
+  cudaMemcpy(&e_zero, d_ezero_ptr, sizeof(Real_t), cudaMemcpyDeviceToHost);
 
-    printf("Run completed:  \n");
-    printf("   Problem size        =  %i \n", nx);
-    printf("   MPI tasks           =  %i \n", numRanks);
-    printf("   Iteration count     =  %i \n", its);
-    printf("   Final Origin Energy = %12.6e \n", e_zero);
+  printf("Run completed:  \n");
+  printf("   Problem size        =  %i \n", nx);
+  printf("   MPI tasks           =  %i \n", numRanks);
+  printf("   Iteration count     =  %i \n", its);
+  printf("   Final Origin Energy = %12.6e \n", e_zero);
 
-    Real_t MaxAbsDiff = Real_t(0.0);
-    Real_t TotalAbsDiff = Real_t(0.0);
-    Real_t MaxRelDiff = Real_t(0.0);
+  Real_t MaxAbsDiff = Real_t(0.0);
+  Real_t TotalAbsDiff = Real_t(0.0);
+  Real_t MaxRelDiff = Real_t(0.0);
 
-    Real_t* e_all = new Real_t[nx * nx];
-    cudaMemcpy(e_all, locDom.e.raw(), nx * nx * sizeof(Real_t), cudaMemcpyDeviceToHost);
-    for (Index_t j = 0; j < nx; ++j) {
-      for (Index_t k = j + 1; k < nx; ++k) {
-        Real_t AbsDiff = FABS(e_all[j * nx + k] - e_all[k * nx + j]);
-        TotalAbsDiff += AbsDiff;
+  Real_t* e_all = new Real_t[nx * nx];
+  cudaMemcpy(e_all, locDom.e.raw(), nx * nx * sizeof(Real_t), cudaMemcpyDeviceToHost);
+  for (Index_t j = 0; j < nx; ++j) {
+    for (Index_t k = j + 1; k < nx; ++k) {
+      Real_t AbsDiff = FABS(e_all[j * nx + k] - e_all[k * nx + j]);
+      TotalAbsDiff += AbsDiff;
 
-        if (MaxAbsDiff < AbsDiff) MaxAbsDiff = AbsDiff;
+      if (MaxAbsDiff < AbsDiff) MaxAbsDiff = AbsDiff;
 
-        Real_t RelDiff = AbsDiff / e_all[k * nx + j];
+      Real_t RelDiff = AbsDiff / e_all[k * nx + j];
 
-        if (MaxRelDiff < RelDiff) MaxRelDiff = RelDiff;
-      }
+      if (MaxRelDiff < RelDiff) MaxRelDiff = RelDiff;
     }
-    delete e_all;
-
-    // Quick symmetry check
-    printf("   Testing Plane 0 of Energy Array on rank 0:\n");
-    printf("        MaxAbsDiff   = %12.6e\n", MaxAbsDiff);
-    printf("        TotalAbsDiff = %12.6e\n", TotalAbsDiff);
-    printf("        MaxRelDiff   = %12.6e\n\n", MaxRelDiff);
   }
+  delete e_all;
+
+  // Quick symmetry check
+  printf("   Testing Plane 0 of Energy Array on rank 0:\n");
+  printf("        MaxAbsDiff   = %12.6e\n", MaxAbsDiff);
+  printf("        TotalAbsDiff = %12.6e\n", TotalAbsDiff);
+  printf("        MaxRelDiff   = %12.6e\n\n", MaxRelDiff);
 
   // Timing information
   printf("\nElapsed time         = %10.2f (s)\n", elapsed_time);
@@ -3265,6 +3062,10 @@ int main(int argc, char* argv[]) {
   }
 
   bool structured = (strcmp(argv[1], "-s") == 0);
+  if (!structured) {
+    printf("Unstructured meshes feature is not supported.\n");
+    exit(-1);
+  }
 
   Int_t numRanks;
   Int_t myRank;
@@ -3290,7 +3091,7 @@ int main(int argc, char* argv[]) {
 
   // TODO: modify this constructor to account for new fields
   // TODO: setup communication buffers
-  locDom = NewDomain(argv, numRanks, col, row, plane, nx, side, structured, nr, balance, cost);
+  locDom = NewDomain(argv, numRanks, col, row, plane, nx, side, nr, balance, cost);
 
   cudaDeviceSetCacheConfig(cudaFuncCachePreferL1);
 
@@ -3298,10 +3099,7 @@ int main(int argc, char* argv[]) {
   int its = 0;
 
   if (myRank == 0) {
-    if (structured)
-      printf("Running until t=%f, Problem size=%dx%dx%d\n", locDom->stoptime, nx, nx, nx);
-    else
-      printf("Running until t=%f, Problem size=%d \n", locDom->stoptime, locDom->numElem);
+    printf("Running until t=%f, Problem size=%dx%dx%d\n", locDom->stoptime, nx, nx, nx);
   }
 
   cudaProfilerStart();
@@ -3340,7 +3138,7 @@ int main(int argc, char* argv[]) {
   cudaProfilerStop();
 
   if (myRank == 0)
-    VerifyAndWriteFinalOutput(elapsed_timeG, *locDom, its, nx, numRanks, structured);
+    VerifyAndWriteFinalOutput(elapsed_timeG, *locDom, its, nx, numRanks);
 
   cudaDeviceReset();
 
