@@ -63,19 +63,19 @@ class Domain {
 
   Vector_d<Real_t> elemMass; /* mass */
 
-  Vector_d<Real_t>* vnew; /* new relative volume -- temporary */
+  Vector_d<Real_t> vnew; /* new relative volume -- temporary */
 
-  Vector_d<Real_t>* delv_xi; /* velocity gradient -- temporary */
-  Vector_d<Real_t>* delv_eta;
-  Vector_d<Real_t>* delv_zeta;
+  Vector_d<Real_t> delv_xi; /* velocity gradient -- temporary */
+  Vector_d<Real_t> delv_eta;
+  Vector_d<Real_t> delv_zeta;
 
-  Vector_d<Real_t>* delx_xi; /* coordinate gradient -- temporary */
-  Vector_d<Real_t>* delx_eta;
-  Vector_d<Real_t>* delx_zeta;
+  Vector_d<Real_t> delx_xi; /* coordinate gradient -- temporary */
+  Vector_d<Real_t> delx_eta;
+  Vector_d<Real_t> delx_zeta;
 
-  Vector_d<Real_t>* dxx; /* principal strains -- temporary */
-  Vector_d<Real_t>* dyy;
-  Vector_d<Real_t>* dzz;
+  Vector_d<Real_t> dxx; /* principal strains -- temporary */
+  Vector_d<Real_t> dyy;
+  Vector_d<Real_t> dzz;
 
   /* Node-centered */
 

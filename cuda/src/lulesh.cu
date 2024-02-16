@@ -62,22 +62,24 @@ Additional BSD Notice
 
 */
 
-#include <allocator.h>
 #include <cuda.h>
+#include <cuda_profiler_api.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <thrust/device_ptr.h>
+#include <thrust/fill.h>
 #include <unistd.h>
-#include <util.h>
 
 #include <iomanip>
 #include <iostream>
-#include <sm_utils.inl>
 #include <sstream>
 
-#include "cuda_profiler_api.h"
 #include "lulesh.h"
+#include "sm_utils.inl"
+#include "util.h"
+#include "utilities.h"
 
 /****************************************************/
 /* Allow flexibility for arithmetic representations */
@@ -248,88 +250,90 @@ void cuda_init(int rank) {
 }
 
 void AllocateNodalPersistent(Domain* domain, size_t domNodes) {
-  domain->x.resize(domNodes); /* coordinates */
-  domain->y.resize(domNodes);
-  domain->z.resize(domNodes);
+  domain->x.allocate(domNodes); /* coordinates */
+  domain->y.allocate(domNodes);
+  domain->z.allocate(domNodes);
 
-  domain->xd.resize(domNodes); /* velocities */
-  domain->yd.resize(domNodes);
-  domain->zd.resize(domNodes);
+  domain->xd.allocate(domNodes); /* velocities */
+  domain->yd.allocate(domNodes);
+  domain->zd.allocate(domNodes);
 
-  domain->xdd.resize(domNodes); /* accelerations */
-  domain->ydd.resize(domNodes);
-  domain->zdd.resize(domNodes);
+  domain->xdd.allocate(domNodes); /* accelerations */
+  domain->ydd.allocate(domNodes);
+  domain->zdd.allocate(domNodes);
 
-  domain->fx.resize(domNodes); /* forces */
-  domain->fy.resize(domNodes);
-  domain->fz.resize(domNodes);
+  domain->fx.allocate(domNodes); /* forces */
+  domain->fy.allocate(domNodes);
+  domain->fz.allocate(domNodes);
 
-  domain->nodalMass.resize(domNodes); /* mass */
+  domain->nodalMass.allocate(domNodes); /* mass */
 }
 
 void AllocateElemPersistent(Domain* domain, size_t domElems, size_t padded_domElems) {
-  domain->matElemlist.resize(domElems);         /* material indexset */
-  domain->nodelist.resize(8 * padded_domElems); /* elemToNode connectivity */
+  domain->matElemlist.allocate(domElems);         /* material indexset */
+  domain->nodelist.allocate(8 * padded_domElems); /* elemToNode connectivity */
 
-  domain->lxim.resize(domElems); /* elem connectivity through face */
-  domain->lxip.resize(domElems);
-  domain->letam.resize(domElems);
-  domain->letap.resize(domElems);
-  domain->lzetam.resize(domElems);
-  domain->lzetap.resize(domElems);
+  domain->lxim.allocate(domElems); /* elem connectivity through face */
+  domain->lxip.allocate(domElems);
+  domain->letam.allocate(domElems);
+  domain->letap.allocate(domElems);
+  domain->lzetam.allocate(domElems);
+  domain->lzetap.allocate(domElems);
 
-  domain->elemBC.resize(domElems); /* elem face symm/free-surf flag */
+  domain->elemBC.allocate(domElems); /* elem face symm/free-surf flag */
 
-  domain->e.resize(domElems); /* energy */
-  domain->p.resize(domElems); /* pressure */
+  domain->e.allocate(domElems); /* energy */
+  domain->p.allocate(domElems); /* pressure */
 
-  domain->q.resize(domElems);  /* q */
-  domain->ql.resize(domElems); /* linear term for q */
-  domain->qq.resize(domElems); /* quadratic term for q */
+  domain->q.allocate(domElems);  /* q */
+  domain->ql.allocate(domElems); /* linear term for q */
+  domain->qq.allocate(domElems); /* quadratic term for q */
 
-  domain->v.resize(domElems); /* relative volume */
+  domain->v.allocate(domElems); /* relative volume */
 
-  domain->volo.resize(domElems); /* reference volume */
-  domain->delv.resize(domElems); /* m_vnew - m_v */
-  domain->vdov.resize(domElems); /* volume derivative over volume */
+  domain->volo.allocate(domElems); /* reference volume */
+  domain->delv.allocate(domElems); /* m_vnew - m_v */
+  domain->vdov.allocate(domElems); /* volume derivative over volume */
 
-  domain->arealg.resize(domElems); /* elem characteristic length */
+  domain->arealg.allocate(domElems); /* elem characteristic length */
 
-  domain->ss.resize(domElems); /* "sound speed" */
+  domain->ss.allocate(domElems); /* "sound speed" */
 
-  domain->elemMass.resize(domElems); /* mass */
+  domain->elemMass.allocate(domElems); /* mass */
 }
 
 void AllocateSymmX(Domain* domain, size_t size) {
-  domain->symmX.resize(size);
+  domain->symmX.allocate(size);
 }
 
 void AllocateSymmY(Domain* domain, size_t size) {
-  domain->symmY.resize(size);
+  domain->symmY.allocate(size);
 }
 
 void AllocateSymmZ(Domain* domain, size_t size) {
-  domain->symmZ.resize(size);
+  domain->symmZ.allocate(size);
 }
 
 void InitializeFields(Domain* domain) {
   /* Basic Field Initialization */
 
-  thrust::fill(domain->ss.begin(), domain->ss.end(), 0.);
-  thrust::fill(domain->e.begin(), domain->e.end(), 0.);
-  thrust::fill(domain->p.begin(), domain->p.end(), 0.);
-  thrust::fill(domain->q.begin(), domain->q.end(), 0.);
-  thrust::fill(domain->v.begin(), domain->v.end(), 1.);
+  checkCudaErrors(cudaMemset(domain->ss.raw(), 0, domain->ss.bytes()));
+  checkCudaErrors(cudaMemset(domain->e.raw(), 0, domain->e.bytes()));
+  checkCudaErrors(cudaMemset(domain->p.raw(), 0, domain->p.bytes()));
+  checkCudaErrors(cudaMemset(domain->q.raw(), 0, domain->q.bytes()));
 
-  thrust::fill(domain->xd.begin(), domain->xd.end(), 0.);
-  thrust::fill(domain->yd.begin(), domain->yd.end(), 0.);
-  thrust::fill(domain->zd.begin(), domain->zd.end(), 0.);
+  thrust::device_ptr<Real_t> thrustDevicePtrV(domain->v.raw());
+  thrust::fill(thrustDevicePtrV, thrustDevicePtrV + domain->v.size(), 1.);
 
-  thrust::fill(domain->xdd.begin(), domain->xdd.end(), 0.);
-  thrust::fill(domain->ydd.begin(), domain->ydd.end(), 0.);
-  thrust::fill(domain->zdd.begin(), domain->zdd.end(), 0.);
+  checkCudaErrors(cudaMemset(domain->xd.raw(), 0, domain->xd.bytes()));
+  checkCudaErrors(cudaMemset(domain->yd.raw(), 0, domain->yd.bytes()));
+  checkCudaErrors(cudaMemset(domain->zd.raw(), 0, domain->zd.bytes()));
 
-  thrust::fill(domain->nodalMass.begin(), domain->nodalMass.end(), 0.);
+  checkCudaErrors(cudaMemset(domain->xdd.raw(), 0, domain->xdd.bytes()));
+  checkCudaErrors(cudaMemset(domain->ydd.raw(), 0, domain->ydd.bytes()));
+  checkCudaErrors(cudaMemset(domain->zdd.raw(), 0, domain->zdd.bytes()));
+
+  checkCudaErrors(cudaMemset(domain->nodalMass.raw(), 0, domain->nodalMass.bytes()));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -688,6 +692,9 @@ Domain* NewDomain(char* argv[], Int_t numRanks, Index_t colLoc, Index_t rowLoc, 
     }
   }
 
+  domain->nodeElemStart.allocate(nodeElemStart_h.size());
+  domain->nodeElemCount.allocate(nodeElemCount_h.size());
+  domain->nodeElemCornerList.allocate(nodeElemCornerList_h.size());
   domain->nodeElemStart = nodeElemStart_h;
   domain->nodeElemCount = nodeElemCount_h;
   domain->nodeElemCornerList = nodeElemCornerList_h;
@@ -784,18 +791,18 @@ Domain* NewDomain(char* argv[], Int_t numRanks, Index_t colLoc, Index_t rowLoc, 
   if (domain->m_rowLoc + domain->m_colLoc + domain->m_planeLoc == 0) {
     // Dump into the first zone (which we know is in the corner)
     // of the domain that sits at the origin
-    domain->e[0] = einit;
+    checkCudaErrors(cudaMemcpy(domain->e.raw(), &einit, sizeof(Real_t), cudaMemcpyDefault));
   }
 
   // set initial deltatime base on analytic CFL calculation
-  domain->deltatime_h = (.5 * cbrt(domain->volo[0])) / sqrt(2 * einit);
+  domain->deltatime_h = (.5 * cbrt(volo_h[0])) / sqrt(2 * einit);
 
   domain->cost = cost;
-  domain->regNumList.resize(domain->numElem);   // material indexset
-  domain->regElemlist.resize(domain->numElem);  // material indexset
-  domain->regCSR.resize(nr);
-  domain->regReps.resize(nr);
-  domain->regSorted.resize(nr);
+  domain->regNumList.allocate(domain->numElem);   // material indexset
+  domain->regElemlist.allocate(domain->numElem);  // material indexset
+  domain->regCSR.allocate(nr);
+  domain->regReps.allocate(nr);
+  domain->regSorted.allocate(nr);
 
   // Setup region index sets. For now, these are constant sized
   // throughout the run, but could be changed every cycle to
@@ -1540,9 +1547,10 @@ static inline void CalcVolumeForceForElems(const Real_t hgcoef, Domain* domain) 
   Index_t padded_numElem = domain->padded_numElem;
 
 #ifdef DOUBLE_PRECISION
-  Vector_d<Real_t>* fx_elem = Allocator<Vector_d<Real_t>>::allocate(padded_numElem * 8);
-  Vector_d<Real_t>* fy_elem = Allocator<Vector_d<Real_t>>::allocate(padded_numElem * 8);
-  Vector_d<Real_t>* fz_elem = Allocator<Vector_d<Real_t>>::allocate(padded_numElem * 8);
+  Vector_d<Real_t> fx_elem, fy_elem, fz_elem;
+  fx_elem.allocate(padded_numElem * 8);
+  fy_elem.allocate(padded_numElem * 8);
+  fz_elem.allocate(padded_numElem * 8);
 #else
   thrust::fill(domain->fx.begin(), domain->fx.end(), 0.);
   thrust::fill(domain->fy.begin(), domain->fy.end(), 0.);
@@ -1557,7 +1565,7 @@ static inline void CalcVolumeForceForElems(const Real_t hgcoef, Domain* domain) 
   if (hourg_gt_zero) {
     CalcVolumeForceForElems_kernel<true><<<dimGrid, block_size>>>(domain->volo.raw(), domain->v.raw(), domain->p.raw(), domain->q.raw(), hgcoef, numElem, padded_numElem, domain->nodelist.raw(), domain->ss.raw(), domain->elemMass.raw(), domain->x.raw(), domain->y.raw(), domain->z.raw(), domain->xd.raw(), domain->yd.raw(), domain->zd.raw(),
 #ifdef DOUBLE_PRECISION
-                                                                  fx_elem->raw(), fy_elem->raw(), fz_elem->raw(),
+                                                                  fx_elem.raw(), fy_elem.raw(), fz_elem.raw(),
 #else
                                                                   domain->fx.raw(), domain->fy.raw(), domain->fz.raw(),
 #endif
@@ -1565,7 +1573,7 @@ static inline void CalcVolumeForceForElems(const Real_t hgcoef, Domain* domain) 
   } else {
     CalcVolumeForceForElems_kernel<false><<<dimGrid, block_size>>>(domain->volo.raw(), domain->v.raw(), domain->p.raw(), domain->q.raw(), hgcoef, numElem, padded_numElem, domain->nodelist.raw(), domain->ss.raw(), domain->elemMass.raw(), domain->x.raw(), domain->y.raw(), domain->z.raw(), domain->xd.raw(), domain->yd.raw(), domain->zd.raw(),
 #ifdef DOUBLE_PRECISION
-                                                                   fx_elem->raw(), fy_elem->raw(), fz_elem->raw(),
+                                                                   fx_elem.raw(), fy_elem.raw(), fz_elem.raw(),
 #else
                                                                    domain->fx.raw(), domain->fy.raw(), domain->fz.raw(),
 #endif
@@ -1578,13 +1586,22 @@ static inline void CalcVolumeForceForElems(const Real_t hgcoef, Domain* domain) 
   // Launch boundary nodes first
   dimGrid = PAD_DIV(num_threads, block_size);
 
-  AddNodeForcesFromElems_kernel<<<dimGrid, block_size>>>(domain->numNode, domain->padded_numNode, domain->nodeElemCount.raw(), domain->nodeElemStart.raw(), domain->nodeElemCornerList.raw(), fx_elem->raw(), fy_elem->raw(), fz_elem->raw(), domain->fx.raw(), domain->fy.raw(), domain->fz.raw(), num_threads);
+  AddNodeForcesFromElems_kernel<<<dimGrid, block_size>>>(
+    domain->numNode,
+    domain->padded_numNode,
+    domain->nodeElemCount.raw(),
+    domain->nodeElemStart.raw(),
+    domain->nodeElemCornerList.raw(),
+    fx_elem.raw(), fy_elem.raw(), fz_elem.raw(),
+    domain->fx.raw(), domain->fy.raw(), domain->fz.raw(),
+    num_threads
+  );
   //    cudaDeviceSynchronize();
   //    cudaCheckError();
 
-  Allocator<Vector_d<Real_t>>::free(fx_elem, padded_numElem * 8);
-  Allocator<Vector_d<Real_t>>::free(fy_elem, padded_numElem * 8);
-  Allocator<Vector_d<Real_t>>::free(fz_elem, padded_numElem * 8);
+  fx_elem.free();
+  fy_elem.free();
+  fz_elem.free();
 
 #endif  // ifdef DOUBLE_PRECISION
   return;
@@ -2045,7 +2062,7 @@ static inline void CalcKinematicsAndMonotonicQGradient(Domain* domain) {
   const int block_size = 64;
   int dimGrid = PAD_DIV(num_threads, block_size);
 
-  CalcKinematicsAndMonotonicQGradient_kernel<<<dimGrid, block_size>>>(numElem, padded_numElem, domain->deltatime_h, domain->nodelist.raw(), domain->volo.raw(), domain->v.raw(), domain->x.raw(), domain->y.raw(), domain->z.raw(), domain->xd.raw(), domain->yd.raw(), domain->zd.raw(), domain->vnew->raw(), domain->delv.raw(), domain->arealg.raw(), domain->dxx->raw(), domain->dyy->raw(), domain->dzz->raw(), domain->vdov.raw(), domain->delx_zeta->raw(), domain->delv_zeta->raw(), domain->delx_xi->raw(), domain->delv_xi->raw(), domain->delx_eta->raw(), domain->delv_eta->raw(), domain->bad_vol_h, num_threads);
+  CalcKinematicsAndMonotonicQGradient_kernel<<<dimGrid, block_size>>>(numElem, padded_numElem, domain->deltatime_h, domain->nodelist.raw(), domain->volo.raw(), domain->v.raw(), domain->x.raw(), domain->y.raw(), domain->z.raw(), domain->xd.raw(), domain->yd.raw(), domain->zd.raw(), domain->vnew.raw(), domain->delv.raw(), domain->arealg.raw(), domain->dxx.raw(), domain->dyy.raw(), domain->dzz.raw(), domain->vdov.raw(), domain->delx_zeta.raw(), domain->delv_zeta.raw(), domain->delx_xi.raw(), domain->delv_xi.raw(), domain->delx_eta.raw(), domain->delv_eta.raw(), domain->bad_vol_h, num_threads);
 
   // cudaDeviceSynchronize();
   // cudaCheckError();
@@ -2274,7 +2291,7 @@ static inline void CalcMonotonicQRegionForElems(Domain* domain) {
   Index_t dimBlock = 128;
   Index_t dimGrid = PAD_DIV(elength, dimBlock);
 
-  CalcMonotonicQRegionForElems_kernel<<<dimGrid, dimBlock>>>(qlc_monoq, qqc_monoq, monoq_limiter_mult, monoq_max_slope, ptiny, elength, domain->regElemlist.raw(), domain->elemBC.raw(), domain->lxim.raw(), domain->lxip.raw(), domain->letam.raw(), domain->letap.raw(), domain->lzetam.raw(), domain->lzetap.raw(), domain->delv_xi->raw(), domain->delv_eta->raw(), domain->delv_zeta->raw(), domain->delx_xi->raw(), domain->delx_eta->raw(), domain->delx_zeta->raw(), domain->vdov.raw(), domain->elemMass.raw(), domain->volo.raw(), domain->vnew->raw(), domain->qq.raw(), domain->ql.raw(), domain->q.raw(), domain->qstop, domain->bad_q_h);
+  CalcMonotonicQRegionForElems_kernel<<<dimGrid, dimBlock>>>(qlc_monoq, qqc_monoq, monoq_limiter_mult, monoq_max_slope, ptiny, elength, domain->regElemlist.raw(), domain->elemBC.raw(), domain->lxim.raw(), domain->lxip.raw(), domain->letam.raw(), domain->letap.raw(), domain->lzetam.raw(), domain->lzetap.raw(), domain->delv_xi.raw(), domain->delv_eta.raw(), domain->delv_zeta.raw(), domain->delx_xi.raw(), domain->delx_eta.raw(), domain->delx_zeta.raw(), domain->vdov.raw(), domain->elemMass.raw(), domain->volo.raw(), domain->vnew.raw(), domain->qq.raw(), domain->ql.raw(), domain->q.raw(), domain->qstop, domain->bad_q_h);
 
   // cudaDeviceSynchronize();
   // cudaCheckError();
@@ -2562,7 +2579,7 @@ static inline void ApplyMaterialPropertiesAndUpdateVolume(Domain* domain) {
     Index_t dimBlock = 128;
     Index_t dimGrid = PAD_DIV(length, dimBlock);
 
-    ApplyMaterialPropertiesAndUpdateVolume_kernel<<<dimGrid, dimBlock>>>(length, domain->refdens, domain->e_cut, domain->emin, domain->ql.raw(), domain->qq.raw(), domain->vnew->raw(), domain->v.raw(), domain->pmin, domain->p_cut, domain->q_cut, domain->eosvmin, domain->eosvmax, domain->regElemlist.raw(), domain->e.raw(), domain->delv.raw(), domain->p.raw(), domain->q.raw(), domain->ss4o3, domain->ss.raw(), domain->v_cut, domain->bad_vol_h, domain->cost, domain->regCSR.raw(), domain->regReps.raw(), domain->numReg);
+    ApplyMaterialPropertiesAndUpdateVolume_kernel<<<dimGrid, dimBlock>>>(length, domain->refdens, domain->e_cut, domain->emin, domain->ql.raw(), domain->qq.raw(), domain->vnew.raw(), domain->v.raw(), domain->pmin, domain->p_cut, domain->q_cut, domain->eosvmin, domain->eosvmax, domain->regElemlist.raw(), domain->e.raw(), domain->delv.raw(), domain->p.raw(), domain->q.raw(), domain->ss4o3, domain->ss.raw(), domain->v_cut, domain->bad_vol_h, domain->cost, domain->regCSR.raw(), domain->regReps.raw(), domain->numReg);
 
     // cudaDeviceSynchronize();
     // cudaCheckError();
@@ -2575,45 +2592,45 @@ static inline void LagrangeElements(Domain* domain) {
                 2 * domain->sizeX * domain->sizeZ + /* row ghosts */
                 2 * domain->sizeY * domain->sizeZ;  /* col ghosts */
 
-  domain->vnew = Allocator<Vector_d<Real_t>>::allocate(domain->numElem);
-  domain->dxx = Allocator<Vector_d<Real_t>>::allocate(domain->numElem);
-  domain->dyy = Allocator<Vector_d<Real_t>>::allocate(domain->numElem);
-  domain->dzz = Allocator<Vector_d<Real_t>>::allocate(domain->numElem);
+  domain->vnew.allocate(domain->numElem);
+  domain->dxx.allocate(domain->numElem);
+  domain->dyy.allocate(domain->numElem);
+  domain->dzz.allocate(domain->numElem);
 
-  domain->delx_xi = Allocator<Vector_d<Real_t>>::allocate(domain->numElem);
-  domain->delx_eta = Allocator<Vector_d<Real_t>>::allocate(domain->numElem);
-  domain->delx_zeta = Allocator<Vector_d<Real_t>>::allocate(domain->numElem);
+  domain->delx_xi.allocate(domain->numElem);
+  domain->delx_eta.allocate(domain->numElem);
+  domain->delx_zeta.allocate(domain->numElem);
 
-  domain->delv_xi = Allocator<Vector_d<Real_t>>::allocate(allElem);
-  domain->delv_eta = Allocator<Vector_d<Real_t>>::allocate(allElem);
-  domain->delv_zeta = Allocator<Vector_d<Real_t>>::allocate(allElem);
+  domain->delv_xi.allocate(allElem);
+  domain->delv_eta.allocate(allElem);
+  domain->delv_zeta.allocate(allElem);
 
   /*********************************************/
   /*  Calc Kinematics and Monotic Q Gradient   */
   /*********************************************/
   CalcKinematicsAndMonotonicQGradient(domain);
 
-  Allocator<Vector_d<Real_t>>::free(domain->dxx, domain->numElem);
-  Allocator<Vector_d<Real_t>>::free(domain->dyy, domain->numElem);
-  Allocator<Vector_d<Real_t>>::free(domain->dzz, domain->numElem);
+  domain->dxx.free();
+  domain->dyy.free();
+  domain->dzz.free();
 
   /**********************************
    *    Calc Monotic Q Region
    **********************************/
   CalcMonotonicQRegionForElems(domain);
 
-  Allocator<Vector_d<Real_t>>::free(domain->delx_xi, domain->numElem);
-  Allocator<Vector_d<Real_t>>::free(domain->delx_eta, domain->numElem);
-  Allocator<Vector_d<Real_t>>::free(domain->delx_zeta, domain->numElem);
+  domain->delx_xi.free();
+  domain->delx_eta.free();
+  domain->delx_zeta.free();
 
-  Allocator<Vector_d<Real_t>>::free(domain->delv_xi, allElem);
-  Allocator<Vector_d<Real_t>>::free(domain->delv_eta, allElem);
-  Allocator<Vector_d<Real_t>>::free(domain->delv_zeta, allElem);
+  domain->delv_xi.free();
+  domain->delv_eta.free();
+  domain->delv_zeta.free();
 
   //  printf("\n --Start of ApplyMaterials! \n");
   ApplyMaterialPropertiesAndUpdateVolume(domain);
   //  printf("\n --End of ApplyMaterials! \n");
-  Allocator<Vector_d<Real_t>>::free(domain->vnew, domain->numElem);
+  domain->vnew.free();
 }
 
 template <int block_size>
@@ -2880,18 +2897,19 @@ static inline void CalcTimeConstraintsForElems(Domain* domain) {
 
   cudaFuncSetCacheConfig(CalcTimeConstraintsForElems_kernel<dimBlock>, cudaFuncCachePreferShared);
 
-  Vector_d<Real_t>* dev_mindtcourant = Allocator<Vector_d<Real_t>>::allocate(dimGrid);
-  Vector_d<Real_t>* dev_mindthydro = Allocator<Vector_d<Real_t>>::allocate(dimGrid);
+  Vector_d<Real_t> dev_mindtcourant, dev_mindthydro;
+  dev_mindtcourant.allocate(dimGrid);
+  dev_mindthydro.allocate(dimGrid);
 
-  CalcTimeConstraintsForElems_kernel<dimBlock><<<dimGrid, dimBlock>>>(length, qqc2, dvovmax, domain->matElemlist.raw(), domain->ss.raw(), domain->vdov.raw(), domain->arealg.raw(), dev_mindtcourant->raw(), dev_mindthydro->raw());
+  CalcTimeConstraintsForElems_kernel<dimBlock><<<dimGrid, dimBlock>>>(length, qqc2, dvovmax, domain->matElemlist.raw(), domain->ss.raw(), domain->vdov.raw(), domain->arealg.raw(), dev_mindtcourant.raw(), dev_mindthydro.raw());
 
   // TODO: if dimGrid < 1024, should launch less threads
-  CalcMinDtOneBlock<max_dimGrid><<<2, max_dimGrid, max_dimGrid * sizeof(Real_t), domain->streams[1]>>>(dev_mindthydro->raw(), dev_mindtcourant->raw(), domain->dtcourant_h, domain->dthydro_h, dimGrid);
+  CalcMinDtOneBlock<max_dimGrid><<<2, max_dimGrid, max_dimGrid * sizeof(Real_t), domain->streams[1]>>>(dev_mindthydro.raw(), dev_mindtcourant.raw(), domain->dtcourant_h, domain->dthydro_h, dimGrid);
 
   cudaEventRecord(domain->time_constraint_computed, domain->streams[1]);
 
-  Allocator<Vector_d<Real_t>>::free(dev_mindtcourant, dimGrid);
-  Allocator<Vector_d<Real_t>>::free(dev_mindthydro, dimGrid);
+  dev_mindtcourant.free();
+  dev_mindthydro.free();
 }
 
 static inline void LagrangeLeapFrog(Domain* domain) {
@@ -2915,9 +2933,12 @@ void printUsage(char* argv[]) {
 }
 
 void write_solution(Domain* locDom) {
-  Vector_h<Real_t> x_h = locDom->x;
-  Vector_h<Real_t> y_h = locDom->y;
-  Vector_h<Real_t> z_h = locDom->z;
+  Vector_h<Real_t> x_h(locDom->x.size());
+  Vector_h<Real_t> y_h(locDom->y.size());
+  Vector_h<Real_t> z_h(locDom->z.size());
+  x_h = locDom->x;
+  y_h = locDom->y;
+  z_h = locDom->z;
 
   //  printf("Writing solution to file xyz.asc\n");
   std::stringstream filename;

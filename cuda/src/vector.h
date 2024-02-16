@@ -1,7 +1,10 @@
 #pragma once
 
-#include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
+
+#include <cassert>
+
+#include "utilities.h"
 
 template <class T>
 class Vector_h;
@@ -16,21 +19,9 @@ class Vector_h : public thrust::host_vector<T> {
   // Constructors
   Vector_h() {}
   inline Vector_h(int N) : thrust::host_vector<T>(N) {}
-  inline Vector_h(int N, T v) : thrust::host_vector<T>(N, v) {}
-  inline Vector_h(const Vector_h<T>& a) : thrust::host_vector<T>(a) {}
-  inline Vector_h(const Vector_d<T>& a) : thrust::host_vector<T>(a) {}
 
-  template <typename OtherVector>
-  inline void copy(const OtherVector& a) {
-    this->assign(a.begin(), a.end());
-  }
-
-  inline Vector_h<T>& operator=(const Vector_h<T>& a) {
-    copy(a);
-    return *this;
-  }
   inline Vector_h<T>& operator=(const Vector_d<T>& a) {
-    copy(a);
+    checkCudaErrors(cudaMemcpy(this->raw(), a.raw(), this->bytes(), cudaMemcpyDefault));
     return *this;
   }
 
@@ -53,41 +44,50 @@ class Vector_h : public thrust::host_vector<T> {
 
 // device vector
 template <class T>
-class Vector_d : public thrust::device_vector<T> {
+class Vector_d {
  public:
-  Vector_d() {}
-  inline Vector_d(int N) : thrust::device_vector<T>(N) {}
-  inline Vector_d(int N, T v) : thrust::device_vector<T>(N, v) {}
-  inline Vector_d(const Vector_d<T>& a) : thrust::device_vector<T>(a) {}
-  inline Vector_d(const Vector_h<T>& a) : thrust::device_vector<T>(a) {}
-
-  template <typename OtherVector>
-  inline void copy(const OtherVector& a) {
-    this->assign(a.begin(), a.end());
+  Vector_d() {
+    this->_data = nullptr;
+    this->_size = 0;
   }
 
-  inline Vector_d<T>& operator=(const Vector_d<T>& a) {
-    copy(a);
-    return *this;
+  inline void allocate(size_t size) {
+    assert(this->_data == nullptr);
+    this->_size = size;
+    checkCudaErrors(cudaMalloc(&this->_data, this->bytes()));
   }
-  inline Vector_d<T>& operator=(const Vector_h<T>& a) {
-    copy(a);
-    return *this;
+
+  inline void free() {
+    assert(this->_data != nullptr);
+    checkCudaErrors(cudaFree(this->_data));
+    this->_data = nullptr;
+    this->_size = 0;
   }
 
   inline T* raw() {
-    if (bytes() > 0)
-      return thrust::raw_pointer_cast(this->data());
-    else
-      return 0;
+    assert(this->_data != nullptr);
+    return this->_data;
   }
 
   inline const T* raw() const {
-    if (bytes() > 0)
-      return thrust::raw_pointer_cast(this->data());
-    else
-      return 0;
+    assert(this->_data != nullptr);
+    return this->_data;
   }
 
-  inline size_t bytes() const { return this->size() * sizeof(T); }
+  inline size_t size() {
+    return this->_size;
+  }
+
+  inline size_t bytes() {
+    return this->_size * sizeof(T);
+  }
+
+  inline Vector_d<T>& operator=(const Vector_h<T>& a) {
+    checkCudaErrors(cudaMemcpy(this->raw(), a.raw(), this->bytes(), cudaMemcpyDefault));
+    return *this;
+  }
+
+ private:
+  T* _data;
+  size_t _size;
 };
