@@ -975,7 +975,13 @@ void Domain::CreateRegionIndexSets(Int_t nr, Int_t b) {
 
 }  // end of create function
 
-static inline void TimeIncrement(Domain* domain) {
+static inline void TimeIncrement(Domain* domain, bool manual = false) {
+  static bool firstTime = true;
+  if (!manual && firstTime) {
+    firstTime = false;
+    return;
+  }
+
   // To make sure dtcourant and dthydro have been updated on host
   cudaEventSynchronize(domain->time_constraint_computed);
 
@@ -3124,6 +3130,8 @@ int main(int argc, char* argv[]) {
   }
 
   cudaProfilerStart();
+
+  TimeIncrement(locDom, true);
 
   timeval start;
   gettimeofday(&start, NULL);
