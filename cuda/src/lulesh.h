@@ -26,8 +26,7 @@ class Domain {
   void sortRegions(Vector_h<Int_t>& regReps_h, Vector_h<Index_t>& regSorted_h);
   void CreateRegionIndexSets(Int_t nr, Int_t balance);
 
-  Index_t max_streams;
-  std::vector<cudaStream_t> streams;
+  cudaStream_t mainStream;
 
   /* Elem-centered */
 
@@ -121,11 +120,8 @@ class Domain {
   Index_t* bad_q_h;    /* flag to indicate Q error */
   Index_t* bad_vol_h;  /* flag to indicate volume error */
 
-  /* cuda Events to indicate completion of certain kernels */
-  cudaEvent_t time_constraint_computed;
-
   Real_t time_h;      /* current time */
-  Real_t deltatime_h; /* variable time increment */
+  Real_t* deltatime_h; /* variable time increment */
 
   Real_t u_cut;  /* velocity tolerance */
   Real_t hgcoef; /* hourglass control */

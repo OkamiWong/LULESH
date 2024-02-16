@@ -74,7 +74,10 @@ Additional BSD Notice
 
 #include <iomanip>
 #include <iostream>
+#include <map>
+#include <memory>
 #include <sstream>
+#include <vector>
 
 #include "lulesh.h"
 #include "sm_utils.inl"
@@ -551,14 +554,6 @@ void Domain::BuildMesh(Int_t nx, Int_t edgeNodes, Int_t edgeElems, Int_t domNode
 Domain* NewDomain(char* argv[], Int_t numRanks, Index_t colLoc, Index_t rowLoc, Index_t planeLoc, Index_t nx, int tp, Int_t nr, Int_t balance, Int_t cost) {
   Domain* domain = new Domain;
 
-  domain->max_streams = 32;
-  domain->streams.resize(domain->max_streams);
-
-  for (Int_t i = 0; i < domain->max_streams; i++)
-    cudaStreamCreate(&(domain->streams[i]));
-
-  cudaEventCreateWithFlags(&domain->time_constraint_computed, cudaEventDisableTiming);
-
   Index_t domElems;
   Index_t domNodes;
   Index_t padded_domElems;
@@ -710,6 +705,7 @@ Domain* NewDomain(char* argv[], Int_t numRanks, Index_t colLoc, Index_t rowLoc, 
   cudaMallocHost(&domain->dthydro_h, sizeof(Real_t), 0);
   cudaMallocHost(&domain->bad_vol_h, sizeof(Index_t), 0);
   cudaMallocHost(&domain->bad_q_h, sizeof(Index_t), 0);
+  cudaMallocHost(&domain->deltatime_h, sizeof(Real_t), 0);
 
   *(domain->bad_vol_h) = -1;
   *(domain->bad_q_h) = -1;
@@ -795,7 +791,7 @@ Domain* NewDomain(char* argv[], Int_t numRanks, Index_t colLoc, Index_t rowLoc, 
   }
 
   // set initial deltatime base on analytic CFL calculation
-  domain->deltatime_h = (.5 * cbrt(volo_h[0])) / sqrt(2 * einit);
+  *domain->deltatime_h = (.5 * cbrt(volo_h[0])) / sqrt(2 * einit);
 
   domain->cost = cost;
   domain->regNumList.allocate(domain->numElem);   // material indexset
@@ -976,9 +972,6 @@ void Domain::CreateRegionIndexSets(Int_t nr, Int_t b) {
 }  // end of create function
 
 static inline void TimeIncrement(Domain* domain) {
-  // To make sure dtcourant and dthydro have been updated on host
-  cudaEventSynchronize(domain->time_constraint_computed);
-
   Real_t targetdt = domain->stoptime - domain->time_h;
 
   if ((domain->dtfixed <= Real_t(0.0)) && (domain->cycle != Int_t(0))) {
@@ -996,7 +989,7 @@ static inline void TimeIncrement(Domain* domain) {
 
     newdt = gnewdt;
 
-    Real_t olddt = domain->deltatime_h;
+    Real_t olddt = *domain->deltatime_h;
     ratio = newdt / olddt;
     if (ratio >= Real_t(1.0)) {
       if (ratio < domain->deltatimemultlb) {
@@ -1009,19 +1002,19 @@ static inline void TimeIncrement(Domain* domain) {
     if (newdt > domain->dtmax) {
       newdt = domain->dtmax;
     }
-    domain->deltatime_h = newdt;
+    *domain->deltatime_h = newdt;
   }
 
   /* TRY TO PREVENT VERY SMALL SCALING ON THE NEXT CYCLE */
-  if ((targetdt > domain->deltatime_h) && (targetdt < (Real_t(4.0) * domain->deltatime_h / Real_t(3.0)))) {
-    targetdt = Real_t(2.0) * domain->deltatime_h / Real_t(3.0);
+  if ((targetdt > *domain->deltatime_h) && (targetdt < (Real_t(4.0) * (*domain->deltatime_h) / Real_t(3.0)))) {
+    targetdt = Real_t(2.0) * (*domain->deltatime_h) / Real_t(3.0);
   }
 
-  if (targetdt < domain->deltatime_h) {
-    domain->deltatime_h = targetdt;
+  if (targetdt < *domain->deltatime_h) {
+    *domain->deltatime_h = targetdt;
   }
 
-  domain->time_h += domain->deltatime_h;
+  domain->time_h += *domain->deltatime_h;
 
   ++domain->cycle;
 }
@@ -1548,9 +1541,9 @@ static inline void CalcVolumeForceForElems(const Real_t hgcoef, Domain* domain) 
 
 #ifdef DOUBLE_PRECISION
   Vector_d<Real_t> fx_elem, fy_elem, fz_elem;
-  fx_elem.allocate(padded_numElem * 8);
-  fy_elem.allocate(padded_numElem * 8);
-  fz_elem.allocate(padded_numElem * 8);
+  fx_elem.allocate(padded_numElem * 8, domain->mainStream);
+  fy_elem.allocate(padded_numElem * 8, domain->mainStream);
+  fz_elem.allocate(padded_numElem * 8, domain->mainStream);
 #else
   thrust::fill(domain->fx.begin(), domain->fx.end(), 0.);
   thrust::fill(domain->fy.begin(), domain->fy.end(), 0.);
@@ -1563,21 +1556,21 @@ static inline void CalcVolumeForceForElems(const Real_t hgcoef, Domain* domain) 
 
   bool hourg_gt_zero = hgcoef > Real_t(0.0);
   if (hourg_gt_zero) {
-    CalcVolumeForceForElems_kernel<true><<<dimGrid, block_size>>>(domain->volo.raw(), domain->v.raw(), domain->p.raw(), domain->q.raw(), hgcoef, numElem, padded_numElem, domain->nodelist.raw(), domain->ss.raw(), domain->elemMass.raw(), domain->x.raw(), domain->y.raw(), domain->z.raw(), domain->xd.raw(), domain->yd.raw(), domain->zd.raw(),
+    CalcVolumeForceForElems_kernel<true><<<dimGrid, block_size, 0, domain->mainStream>>>(domain->volo.raw(), domain->v.raw(), domain->p.raw(), domain->q.raw(), hgcoef, numElem, padded_numElem, domain->nodelist.raw(), domain->ss.raw(), domain->elemMass.raw(), domain->x.raw(), domain->y.raw(), domain->z.raw(), domain->xd.raw(), domain->yd.raw(), domain->zd.raw(),
 #ifdef DOUBLE_PRECISION
-                                                                  fx_elem.raw(), fy_elem.raw(), fz_elem.raw(),
+                                                                                         fx_elem.raw(), fy_elem.raw(), fz_elem.raw(),
 #else
-                                                                  domain->fx.raw(), domain->fy.raw(), domain->fz.raw(),
+                                                                                         domain->fx.raw(), domain->fy.raw(), domain->fz.raw(),
 #endif
-                                                                  domain->bad_vol_h, num_threads);
+                                                                                         domain->bad_vol_h, num_threads);
   } else {
-    CalcVolumeForceForElems_kernel<false><<<dimGrid, block_size>>>(domain->volo.raw(), domain->v.raw(), domain->p.raw(), domain->q.raw(), hgcoef, numElem, padded_numElem, domain->nodelist.raw(), domain->ss.raw(), domain->elemMass.raw(), domain->x.raw(), domain->y.raw(), domain->z.raw(), domain->xd.raw(), domain->yd.raw(), domain->zd.raw(),
+    CalcVolumeForceForElems_kernel<false><<<dimGrid, block_size, 0, domain->mainStream>>>(domain->volo.raw(), domain->v.raw(), domain->p.raw(), domain->q.raw(), hgcoef, numElem, padded_numElem, domain->nodelist.raw(), domain->ss.raw(), domain->elemMass.raw(), domain->x.raw(), domain->y.raw(), domain->z.raw(), domain->xd.raw(), domain->yd.raw(), domain->zd.raw(),
 #ifdef DOUBLE_PRECISION
-                                                                   fx_elem.raw(), fy_elem.raw(), fz_elem.raw(),
+                                                                                          fx_elem.raw(), fy_elem.raw(), fz_elem.raw(),
 #else
-                                                                   domain->fx.raw(), domain->fy.raw(), domain->fz.raw(),
+                                                                                          domain->fx.raw(), domain->fy.raw(), domain->fz.raw(),
 #endif
-                                                                   domain->bad_vol_h, num_threads);
+                                                                                          domain->bad_vol_h, num_threads);
   }
 
 #ifdef DOUBLE_PRECISION
@@ -1586,7 +1579,7 @@ static inline void CalcVolumeForceForElems(const Real_t hgcoef, Domain* domain) 
   // Launch boundary nodes first
   dimGrid = PAD_DIV(num_threads, block_size);
 
-  AddNodeForcesFromElems_kernel<<<dimGrid, block_size>>>(
+  AddNodeForcesFromElems_kernel<<<dimGrid, block_size, 0, domain->mainStream>>>(
     domain->numNode,
     domain->padded_numNode,
     domain->nodeElemCount.raw(),
@@ -1599,9 +1592,9 @@ static inline void CalcVolumeForceForElems(const Real_t hgcoef, Domain* domain) 
   //    cudaDeviceSynchronize();
   //    cudaCheckError();
 
-  fx_elem.free();
-  fy_elem.free();
-  fz_elem.free();
+  fx_elem.free(domain->mainStream);
+  fy_elem.free(domain->mainStream);
+  fz_elem.free(domain->mainStream);
 
 #endif  // ifdef DOUBLE_PRECISION
   return;
@@ -1629,9 +1622,6 @@ static inline void checkErrors(Domain* domain, int its, int myRank) {
 
 static inline void CalcForceForNodes(Domain* domain) {
   CalcVolumeForceForElems(domain);
-
-  // moved here from the main loop to allow async execution with GPU work
-  TimeIncrement(domain);
 }
 
 __global__ void CalcAccelerationForNodes_kernel(int numNode, Real_t* xdd, Real_t* ydd, Real_t* zdd, Real_t* fx, Real_t* fy, Real_t* fz, Real_t* nodalMass) {
@@ -1648,7 +1638,7 @@ static inline void CalcAccelerationForNodes(Domain* domain) {
   Index_t dimBlock = 128;
   Index_t dimGrid = PAD_DIV(domain->numNode, dimBlock);
 
-  CalcAccelerationForNodes_kernel<<<dimGrid, dimBlock>>>(domain->numNode, domain->xdd.raw(), domain->ydd.raw(), domain->zdd.raw(), domain->fx.raw(), domain->fy.raw(), domain->fz.raw(), domain->nodalMass.raw());
+  CalcAccelerationForNodes_kernel<<<dimGrid, dimBlock, 0, domain->mainStream>>>(domain->numNode, domain->xdd.raw(), domain->ydd.raw(), domain->zdd.raw(), domain->fx.raw(), domain->fy.raw(), domain->fz.raw(), domain->nodalMass.raw());
 
   // cudaDeviceSynchronize();
   // cudaCheckError();
@@ -1669,22 +1659,22 @@ static inline void ApplyAccelerationBoundaryConditionsForNodes(Domain* domain) {
 
   Index_t dimGrid = PAD_DIV(domain->numSymmX, dimBlock);
   if (domain->numSymmX > 0)
-    ApplyAccelerationBoundaryConditionsForNodes_kernel<<<dimGrid, dimBlock>>>(domain->numSymmX, domain->xdd.raw(), domain->symmX.raw());
+    ApplyAccelerationBoundaryConditionsForNodes_kernel<<<dimGrid, dimBlock, 0, domain->mainStream>>>(domain->numSymmX, domain->xdd.raw(), domain->symmX.raw());
 
   dimGrid = PAD_DIV(domain->numSymmY, dimBlock);
   if (domain->numSymmY > 0)
-    ApplyAccelerationBoundaryConditionsForNodes_kernel<<<dimGrid, dimBlock>>>(domain->numSymmY, domain->ydd.raw(), domain->symmY.raw());
+    ApplyAccelerationBoundaryConditionsForNodes_kernel<<<dimGrid, dimBlock, 0, domain->mainStream>>>(domain->numSymmY, domain->ydd.raw(), domain->symmY.raw());
 
   dimGrid = PAD_DIV(domain->numSymmZ, dimBlock);
   if (domain->numSymmZ > 0)
-    ApplyAccelerationBoundaryConditionsForNodes_kernel<<<dimGrid, dimBlock>>>(domain->numSymmZ, domain->zdd.raw(), domain->symmZ.raw());
+    ApplyAccelerationBoundaryConditionsForNodes_kernel<<<dimGrid, dimBlock, 0, domain->mainStream>>>(domain->numSymmZ, domain->zdd.raw(), domain->symmZ.raw());
 }
 
-__global__ void CalcPositionAndVelocityForNodes_kernel(int numNode, const Real_t deltatime, const Real_t u_cut, Real_t* __restrict__ x, Real_t* __restrict__ y, Real_t* __restrict__ z, Real_t* __restrict__ xd, Real_t* __restrict__ yd, Real_t* __restrict__ zd, const Real_t* __restrict__ xdd, const Real_t* __restrict__ ydd, const Real_t* __restrict__ zdd) {
+__global__ void CalcPositionAndVelocityForNodes_kernel(int numNode, const Real_t* deltatime, const Real_t u_cut, Real_t* __restrict__ x, Real_t* __restrict__ y, Real_t* __restrict__ z, Real_t* __restrict__ xd, Real_t* __restrict__ yd, Real_t* __restrict__ zd, const Real_t* __restrict__ xdd, const Real_t* __restrict__ ydd, const Real_t* __restrict__ zdd) {
   int i = blockDim.x * blockIdx.x + threadIdx.x;
   if (i < numNode) {
     Real_t xdtmp, ydtmp, zdtmp, dt;
-    dt = deltatime;
+    dt = *deltatime;
 
     xdtmp = xd[i] + xdd[i] * dt;
     ydtmp = yd[i] + ydd[i] * dt;
@@ -1708,30 +1698,20 @@ static inline void CalcPositionAndVelocityForNodes(const Real_t u_cut, Domain* d
   Index_t dimBlock = 128;
   Index_t dimGrid = PAD_DIV(domain->numNode, dimBlock);
 
-  CalcPositionAndVelocityForNodes_kernel<<<dimGrid, dimBlock>>>(domain->numNode, domain->deltatime_h, u_cut, domain->x.raw(), domain->y.raw(), domain->z.raw(), domain->xd.raw(), domain->yd.raw(), domain->zd.raw(), domain->xdd.raw(), domain->ydd.raw(), domain->zdd.raw());
+  CalcPositionAndVelocityForNodes_kernel<<<dimGrid, dimBlock, 0, domain->mainStream>>>(domain->numNode, domain->deltatime_h, u_cut, domain->x.raw(), domain->y.raw(), domain->z.raw(), domain->xd.raw(), domain->yd.raw(), domain->zd.raw(), domain->xdd.raw(), domain->ydd.raw(), domain->zdd.raw());
 
   // cudaDeviceSynchronize();
   // cudaCheckError();
 }
 
 static inline void LagrangeNodal(Domain* domain) {
-#ifdef SEDOV_SYNC_POS_VEL_EARLY
-  Domain_member fieldData[6];
-#endif
-
-  Real_t u_cut = domain->u_cut;
-
-  /* time of boundary condition evaluation is beginning of step for force and
-   * acceleration boundary conditions. */
   CalcForceForNodes(domain);
 
   CalcAccelerationForNodes(domain);
 
   ApplyAccelerationBoundaryConditionsForNodes(domain);
 
-  CalcPositionAndVelocityForNodes(u_cut, domain);
-
-  return;
+  CalcPositionAndVelocityForNodes(domain->u_cut, domain);
 }
 
 __device__ static inline Real_t AreaFace(const Real_t x0, const Real_t x1, const Real_t x2, const Real_t x3, const Real_t y0, const Real_t y1, const Real_t y2, const Real_t y3, const Real_t z0, const Real_t z1, const Real_t z2, const Real_t z3) {
@@ -1899,7 +1879,7 @@ __launch_bounds__(64, 8)  // 64-bit
 __launch_bounds__(64, 16)  // 32-bit
 #endif
   void CalcKinematicsAndMonotonicQGradient_kernel(
-    Index_t numElem, Index_t padded_numElem, const Real_t dt,
+    Index_t numElem, Index_t padded_numElem, const Real_t* dt,
     const Index_t* __restrict__ nodelist, const Real_t* __restrict__ volo, const Real_t* __restrict__ v,
 
     const Real_t* __restrict__ x,
@@ -2003,7 +1983,7 @@ __launch_bounds__(64, 16)  // 32-bit
       zd_local[lnode] = zd[gnode];
     }
 
-    Real_t dt2 = Real_t(0.5) * dt;
+    Real_t dt2 = Real_t(0.5) * (*dt);
 
 #pragma unroll
     for (Index_t j = 0; j < 8; ++j) {
@@ -2062,7 +2042,7 @@ static inline void CalcKinematicsAndMonotonicQGradient(Domain* domain) {
   const int block_size = 64;
   int dimGrid = PAD_DIV(num_threads, block_size);
 
-  CalcKinematicsAndMonotonicQGradient_kernel<<<dimGrid, block_size>>>(numElem, padded_numElem, domain->deltatime_h, domain->nodelist.raw(), domain->volo.raw(), domain->v.raw(), domain->x.raw(), domain->y.raw(), domain->z.raw(), domain->xd.raw(), domain->yd.raw(), domain->zd.raw(), domain->vnew.raw(), domain->delv.raw(), domain->arealg.raw(), domain->dxx.raw(), domain->dyy.raw(), domain->dzz.raw(), domain->vdov.raw(), domain->delx_zeta.raw(), domain->delv_zeta.raw(), domain->delx_xi.raw(), domain->delv_xi.raw(), domain->delx_eta.raw(), domain->delv_eta.raw(), domain->bad_vol_h, num_threads);
+  CalcKinematicsAndMonotonicQGradient_kernel<<<dimGrid, block_size, 0, domain->mainStream>>>(numElem, padded_numElem, domain->deltatime_h, domain->nodelist.raw(), domain->volo.raw(), domain->v.raw(), domain->x.raw(), domain->y.raw(), domain->z.raw(), domain->xd.raw(), domain->yd.raw(), domain->zd.raw(), domain->vnew.raw(), domain->delv.raw(), domain->arealg.raw(), domain->dxx.raw(), domain->dyy.raw(), domain->dzz.raw(), domain->vdov.raw(), domain->delx_zeta.raw(), domain->delv_zeta.raw(), domain->delx_xi.raw(), domain->delv_xi.raw(), domain->delx_eta.raw(), domain->delv_eta.raw(), domain->bad_vol_h, num_threads);
 
   // cudaDeviceSynchronize();
   // cudaCheckError();
@@ -2291,7 +2271,7 @@ static inline void CalcMonotonicQRegionForElems(Domain* domain) {
   Index_t dimBlock = 128;
   Index_t dimGrid = PAD_DIV(elength, dimBlock);
 
-  CalcMonotonicQRegionForElems_kernel<<<dimGrid, dimBlock>>>(qlc_monoq, qqc_monoq, monoq_limiter_mult, monoq_max_slope, ptiny, elength, domain->regElemlist.raw(), domain->elemBC.raw(), domain->lxim.raw(), domain->lxip.raw(), domain->letam.raw(), domain->letap.raw(), domain->lzetam.raw(), domain->lzetap.raw(), domain->delv_xi.raw(), domain->delv_eta.raw(), domain->delv_zeta.raw(), domain->delx_xi.raw(), domain->delx_eta.raw(), domain->delx_zeta.raw(), domain->vdov.raw(), domain->elemMass.raw(), domain->volo.raw(), domain->vnew.raw(), domain->qq.raw(), domain->ql.raw(), domain->q.raw(), domain->qstop, domain->bad_q_h);
+  CalcMonotonicQRegionForElems_kernel<<<dimGrid, dimBlock, 0, domain->mainStream>>>(qlc_monoq, qqc_monoq, monoq_limiter_mult, monoq_max_slope, ptiny, elength, domain->regElemlist.raw(), domain->elemBC.raw(), domain->lxim.raw(), domain->lxip.raw(), domain->letam.raw(), domain->letap.raw(), domain->lzetam.raw(), domain->lzetap.raw(), domain->delv_xi.raw(), domain->delv_eta.raw(), domain->delv_zeta.raw(), domain->delx_xi.raw(), domain->delx_eta.raw(), domain->delx_zeta.raw(), domain->vdov.raw(), domain->elemMass.raw(), domain->volo.raw(), domain->vnew.raw(), domain->qq.raw(), domain->ql.raw(), domain->q.raw(), domain->qstop, domain->bad_q_h);
 
   // cudaDeviceSynchronize();
   // cudaCheckError();
@@ -2579,7 +2559,7 @@ static inline void ApplyMaterialPropertiesAndUpdateVolume(Domain* domain) {
     Index_t dimBlock = 128;
     Index_t dimGrid = PAD_DIV(length, dimBlock);
 
-    ApplyMaterialPropertiesAndUpdateVolume_kernel<<<dimGrid, dimBlock>>>(length, domain->refdens, domain->e_cut, domain->emin, domain->ql.raw(), domain->qq.raw(), domain->vnew.raw(), domain->v.raw(), domain->pmin, domain->p_cut, domain->q_cut, domain->eosvmin, domain->eosvmax, domain->regElemlist.raw(), domain->e.raw(), domain->delv.raw(), domain->p.raw(), domain->q.raw(), domain->ss4o3, domain->ss.raw(), domain->v_cut, domain->bad_vol_h, domain->cost, domain->regCSR.raw(), domain->regReps.raw(), domain->numReg);
+    ApplyMaterialPropertiesAndUpdateVolume_kernel<<<dimGrid, dimBlock, 0, domain->mainStream>>>(length, domain->refdens, domain->e_cut, domain->emin, domain->ql.raw(), domain->qq.raw(), domain->vnew.raw(), domain->v.raw(), domain->pmin, domain->p_cut, domain->q_cut, domain->eosvmin, domain->eosvmax, domain->regElemlist.raw(), domain->e.raw(), domain->delv.raw(), domain->p.raw(), domain->q.raw(), domain->ss4o3, domain->ss.raw(), domain->v_cut, domain->bad_vol_h, domain->cost, domain->regCSR.raw(), domain->regReps.raw(), domain->numReg);
 
     // cudaDeviceSynchronize();
     // cudaCheckError();
@@ -2592,45 +2572,45 @@ static inline void LagrangeElements(Domain* domain) {
                 2 * domain->sizeX * domain->sizeZ + /* row ghosts */
                 2 * domain->sizeY * domain->sizeZ;  /* col ghosts */
 
-  domain->vnew.allocate(domain->numElem);
-  domain->dxx.allocate(domain->numElem);
-  domain->dyy.allocate(domain->numElem);
-  domain->dzz.allocate(domain->numElem);
+  domain->vnew.allocate(domain->numElem, domain->mainStream);
+  domain->dxx.allocate(domain->numElem, domain->mainStream);
+  domain->dyy.allocate(domain->numElem, domain->mainStream);
+  domain->dzz.allocate(domain->numElem, domain->mainStream);
 
-  domain->delx_xi.allocate(domain->numElem);
-  domain->delx_eta.allocate(domain->numElem);
-  domain->delx_zeta.allocate(domain->numElem);
+  domain->delx_xi.allocate(domain->numElem, domain->mainStream);
+  domain->delx_eta.allocate(domain->numElem, domain->mainStream);
+  domain->delx_zeta.allocate(domain->numElem, domain->mainStream);
 
-  domain->delv_xi.allocate(allElem);
-  domain->delv_eta.allocate(allElem);
-  domain->delv_zeta.allocate(allElem);
+  domain->delv_xi.allocate(allElem, domain->mainStream);
+  domain->delv_eta.allocate(allElem, domain->mainStream);
+  domain->delv_zeta.allocate(allElem, domain->mainStream);
 
   /*********************************************/
   /*  Calc Kinematics and Monotic Q Gradient   */
   /*********************************************/
   CalcKinematicsAndMonotonicQGradient(domain);
 
-  domain->dxx.free();
-  domain->dyy.free();
-  domain->dzz.free();
+  domain->dxx.free(domain->mainStream);
+  domain->dyy.free(domain->mainStream);
+  domain->dzz.free(domain->mainStream);
 
   /**********************************
    *    Calc Monotic Q Region
    **********************************/
   CalcMonotonicQRegionForElems(domain);
 
-  domain->delx_xi.free();
-  domain->delx_eta.free();
-  domain->delx_zeta.free();
+  domain->delx_xi.free(domain->mainStream);
+  domain->delx_eta.free(domain->mainStream);
+  domain->delx_zeta.free(domain->mainStream);
 
-  domain->delv_xi.free();
-  domain->delv_eta.free();
-  domain->delv_zeta.free();
+  domain->delv_xi.free(domain->mainStream);
+  domain->delv_eta.free(domain->mainStream);
+  domain->delv_zeta.free(domain->mainStream);
 
   //  printf("\n --Start of ApplyMaterials! \n");
   ApplyMaterialPropertiesAndUpdateVolume(domain);
   //  printf("\n --End of ApplyMaterials! \n");
-  domain->vnew.free();
+  domain->vnew.free(domain->mainStream);
 }
 
 template <int block_size>
@@ -2898,18 +2878,16 @@ static inline void CalcTimeConstraintsForElems(Domain* domain) {
   cudaFuncSetCacheConfig(CalcTimeConstraintsForElems_kernel<dimBlock>, cudaFuncCachePreferShared);
 
   Vector_d<Real_t> dev_mindtcourant, dev_mindthydro;
-  dev_mindtcourant.allocate(dimGrid);
-  dev_mindthydro.allocate(dimGrid);
+  dev_mindtcourant.allocate(dimGrid, domain->mainStream);
+  dev_mindthydro.allocate(dimGrid, domain->mainStream);
 
-  CalcTimeConstraintsForElems_kernel<dimBlock><<<dimGrid, dimBlock>>>(length, qqc2, dvovmax, domain->matElemlist.raw(), domain->ss.raw(), domain->vdov.raw(), domain->arealg.raw(), dev_mindtcourant.raw(), dev_mindthydro.raw());
+  CalcTimeConstraintsForElems_kernel<dimBlock><<<dimGrid, dimBlock, 0, domain->mainStream>>>(length, qqc2, dvovmax, domain->matElemlist.raw(), domain->ss.raw(), domain->vdov.raw(), domain->arealg.raw(), dev_mindtcourant.raw(), dev_mindthydro.raw());
 
   // TODO: if dimGrid < 1024, should launch less threads
-  CalcMinDtOneBlock<max_dimGrid><<<2, max_dimGrid, max_dimGrid * sizeof(Real_t), domain->streams[1]>>>(dev_mindthydro.raw(), dev_mindtcourant.raw(), domain->dtcourant_h, domain->dthydro_h, dimGrid);
+  CalcMinDtOneBlock<max_dimGrid><<<2, max_dimGrid, max_dimGrid * sizeof(Real_t), domain->mainStream>>>(dev_mindthydro.raw(), dev_mindtcourant.raw(), domain->dtcourant_h, domain->dthydro_h, dimGrid);
 
-  cudaEventRecord(domain->time_constraint_computed, domain->streams[1]);
-
-  dev_mindtcourant.free();
-  dev_mindthydro.free();
+  dev_mindtcourant.free(domain->mainStream);
+  dev_mindthydro.free(domain->mainStream);
 }
 
 static inline void LagrangeLeapFrog(Domain* domain) {
@@ -2922,6 +2900,23 @@ static inline void LagrangeLeapFrog(Domain* domain) {
   LagrangeElements(domain);
 
   CalcTimeConstraintsForElems(domain);
+}
+
+cudaGraph_t recordCudaGraph(Domain* domain) {
+  cudaStream_t s;
+  checkCudaErrors(cudaStreamCreate(&s));
+
+  domain->mainStream = s;
+
+  checkCudaErrors(cudaStreamBeginCapture(s, cudaStreamCaptureModeGlobal));
+
+  LagrangeLeapFrog(domain);
+
+  cudaGraph_t g;
+  checkCudaErrors(cudaStreamEndCapture(s, &g));
+  checkCudaErrors(cudaStreamDestroy(s));
+
+  return g;
 }
 
 void printUsage(char* argv[]) {
@@ -3123,6 +3118,14 @@ int main(int argc, char* argv[]) {
     printf("Running until t=%f, Problem size=%dx%dx%d\n", locDom->stoptime, nx, nx, nx);
   }
 
+  cudaGraph_t graph = recordCudaGraph(locDom);
+
+  cudaGraphExec_t graphExec;
+  checkCudaErrors(cudaGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+
+  cudaStream_t stream;
+  checkCudaErrors(cudaStreamCreate(&stream));
+
   cudaProfilerStart();
 
   timeval start;
@@ -3132,7 +3135,13 @@ int main(int argc, char* argv[]) {
     // this has been moved after computation of volume forces to hide launch latencies
     // TimeIncrement(locDom) ;
 
-    LagrangeLeapFrog(locDom);
+    checkCudaErrors(cudaGraphLaunch(graphExec, stream));
+
+    TimeIncrement(locDom);
+
+    checkCudaErrors(cudaStreamSynchronize(stream));
+
+    // LagrangeLeapFrog(locDom);
 
     checkErrors(locDom, its, myRank);
 
@@ -3145,7 +3154,7 @@ int main(int argc, char* argv[]) {
   }
 
   // make sure GPU finished its work
-  cudaDeviceSynchronize();
+  checkCudaErrors(cudaDeviceSynchronize());
 
   // Use reduced max elapsed time
   double elapsed_time;
@@ -3161,7 +3170,11 @@ int main(int argc, char* argv[]) {
   if (myRank == 0)
     VerifyAndWriteFinalOutput(elapsed_timeG, *locDom, its, nx, numRanks);
 
-  cudaDeviceReset();
+  checkCudaErrors(cudaGraphExecDestroy(graphExec));
+  checkCudaErrors(cudaGraphDestroy(graph));
+  checkCudaErrors(cudaStreamDestroy(stream));
+
+  checkCudaErrors(cudaDeviceReset());
 
   return 0;
 }

@@ -57,9 +57,22 @@ class Vector_d {
     checkCudaErrors(cudaMalloc(&this->_data, this->bytes()));
   }
 
+  inline void allocate(size_t size, cudaStream_t stream) {
+    assert(this->_data == nullptr);
+    this->_size = size;
+    checkCudaErrors(cudaMallocAsync(&this->_data, this->bytes(), stream));
+  }
+
   inline void free() {
     assert(this->_data != nullptr);
     checkCudaErrors(cudaFree(this->_data));
+    this->_data = nullptr;
+    this->_size = 0;
+  }
+
+  inline void free(cudaStream_t stream) {
+    assert(this->_data != nullptr);
+    checkCudaErrors(cudaFreeAsync(this->_data, stream));
     this->_data = nullptr;
     this->_size = 0;
   }
